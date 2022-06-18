@@ -16,7 +16,7 @@
 
 use std::cmp::min;
 use types::transaction::{
-    AccessListTx, Action, EIP1559TransactionTx, SignedTransaction, Transaction, TypedTransaction,
+    AccessListTx, Action, EIP1559TransactionTx, ShardTransactionTx, SignedTransaction, Transaction, TypedTransaction,
     TypedTxId,
 };
 
@@ -70,6 +70,11 @@ pub fn sign_call(request: CallRequest) -> Result<SignedTransaction, Error> {
                 max_priority_fee_per_gas: request.max_priority_fee_per_gas.unwrap_or_default(),
             })
         }
+        // #[cfg(feature = "shard")]
+        Some(TypedTxId::ShardTransaction) => TypedTransaction::ShardTransaction(ShardTransactionTx {
+            transaction:tx_legacy,
+            balance: None,
+        }),
         _ => return Err(Error::new(ErrorCode::InvalidParams)),
     };
     Ok(tx_typed.fake_sign(from))

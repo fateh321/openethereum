@@ -164,7 +164,7 @@ pub fn is_same_block(ref_block: &Block, block: &Unverified) -> bool {
             // check specific tx data
             is_ok = is_ok
                 && match ttype {
-                    TypedTxId::Legacy => {
+                    TypedTxId::Legacy | TypedTxId::ShardTransaction => {
                         test_exp(tx.legacy_v() == ref_tx.v.0.as_u64(), "Original Sig V")
                     }
                     TypedTxId::AccessList | TypedTxId::EIP1559Transaction => {

@@ -268,6 +268,11 @@ impl<'x> OpenBlock<'x> {
         }
 
         let env_info = self.block.env_info();
+        // #[cfg(feature = "shard")]
+        let sender = t.sender();
+        debug!(target: "miner", "transaction looks like {:?}", t);
+        let balance = self.state.balance(&sender)?;
+        let t = t.with_balance(balance);
         let outcome = self.block.state.apply(
             &env_info,
             self.engine.machine(),

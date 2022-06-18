@@ -359,6 +359,7 @@ impl TransactionQueue {
                 let imported = verifier
                     .verify_transaction(transaction)
                     .and_then(|verified| {
+                        trace!(target: "miner_pool_queue", "Verified and importing {:?}", verified);
                         self.pool.write().import(verified, &mut replace).map_err(convert_error)
                     });
 

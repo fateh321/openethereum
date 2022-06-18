@@ -194,6 +194,8 @@ impl Transaction {
         let scheme = CreateContractAddress::FromSenderAndNonce;
 
         let access_list = match t.as_unsigned() {
+            // #[cfg(feature = "shard")]
+            TypedTransaction::ShardTransaction(_) => None,
             TypedTransaction::AccessList(tx) => {
                 Some(tx.access_list.clone().into_iter().map(Into::into).collect())
             }
@@ -263,6 +265,8 @@ impl Transaction {
         let scheme = CreateContractAddress::FromSenderAndNonce;
 
         let access_list = match t.as_unsigned() {
+            // #[cfg(feature = "shard")]
+            TypedTransaction::ShardTransaction(_) => None,
             TypedTransaction::AccessList(tx) => {
                 Some(tx.access_list.clone().into_iter().map(Into::into).collect())
             }

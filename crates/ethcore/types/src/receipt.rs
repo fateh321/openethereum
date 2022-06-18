@@ -113,6 +113,8 @@ pub enum TypedReceipt {
     Legacy(LegacyReceipt),
     AccessList(LegacyReceipt),
     EIP1559Transaction(LegacyReceipt),
+    // #[cfg(feature = "shard")]
+    // ShardTransaction(LegacyReceipt),
 }
 
 impl TypedReceipt {
@@ -120,6 +122,9 @@ impl TypedReceipt {
     pub fn new(type_id: TypedTxId, legacy_receipt: LegacyReceipt) -> Self {
         //curently we are using same receipt for both legacy and typed transaction
         match type_id {
+            // #[cfg(feature = "shard")]
+            // TypedTxId::ShardTransaction => Self::ShardTransaction(legacy_receipt),
+            TypedTxId::ShardTransaction => Self::Legacy(legacy_receipt),
             TypedTxId::EIP1559Transaction => Self::EIP1559Transaction(legacy_receipt),
             TypedTxId::AccessList => Self::AccessList(legacy_receipt),
             TypedTxId::Legacy => Self::Legacy(legacy_receipt),
@@ -128,9 +133,13 @@ impl TypedReceipt {
 
     pub fn tx_type(&self) -> TypedTxId {
         match self {
-            Self::Legacy(_) => TypedTxId::Legacy,
+            // #[cfg(feature = "shard")]
+            Self::Legacy(_) => TypedTxId::ShardTransaction,
+            // Self::Legacy(_) => TypedTxId::Legacy,
             Self::AccessList(_) => TypedTxId::AccessList,
             Self::EIP1559Transaction(_) => TypedTxId::EIP1559Transaction,
+            // #[cfg(feature = "shard")]
+            // Self::ShardTransaction(_) => TypedTxId::ShardTransaction,
         }
     }
 
@@ -139,6 +148,8 @@ impl TypedReceipt {
             Self::Legacy(receipt) => receipt,
             Self::AccessList(receipt) => receipt,
             Self::EIP1559Transaction(receipt) => receipt,
+            // #[cfg(feature = "shard")]
+            // Self::ShardTransaction(receipt) => receipt,
         }
     }
 
@@ -147,6 +158,8 @@ impl TypedReceipt {
             Self::Legacy(receipt) => receipt,
             Self::AccessList(receipt) => receipt,
             Self::EIP1559Transaction(receipt) => receipt,
+            // #[cfg(feature = "shard")]
+            // Self::ShardTransaction(receipt) => receipt,
         }
     }
 
@@ -161,6 +174,11 @@ impl TypedReceipt {
         }
         //other transaction types
         match id.unwrap() {
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => {
+                let rlp = Rlp::new(&tx[1..]);
+                Ok(Self::Legacy(LegacyReceipt::decode(&rlp)?))
+            }
             TypedTxId::EIP1559Transaction => {
                 let rlp = Rlp::new(&tx[1..]);
                 Ok(Self::EIP1559Transaction(LegacyReceipt::decode(&rlp)?))
@@ -207,6 +225,12 @@ impl TypedReceipt {
                 receipt.rlp_append(&mut rlps);
                 s.append(&[&[TypedTxId::EIP1559Transaction as u8], rlps.as_raw()].concat());
             }
+            // #[cfg(feature = "shard")]
+            // Self::ShardTransaction(receipt) => {
+            //     let mut rlps = RlpStream::new();
+            //     receipt.rlp_append(&mut rlps);
+            //     s.append(&[&[TypedTxId::ShardTransaction as u8], rlps.as_raw()].concat());
+            // }
         }
     }
 
@@ -234,6 +258,12 @@ impl TypedReceipt {
                 receipt.rlp_append(&mut rlps);
                 [&[TypedTxId::EIP1559Transaction as u8], rlps.as_raw()].concat()
             }
+            // #[cfg(feature = "shard")]
+            // Self::ShardTransaction(receipt) => {
+            //     let mut rlps = RlpStream::new();
+            //     receipt.rlp_append(&mut rlps);
+            //     [&[TypedTxId::ShardTransaction as u8], rlps.as_raw()].concat()
+            // }
         }
     }
 }

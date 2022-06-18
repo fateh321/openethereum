@@ -18,7 +18,7 @@ use crypto::publickey::{Generator, Random};
 use ethereum_types::{H256, U256};
 use rustc_hex::FromHex;
 use types::transaction::{
-    self, AccessListTx, EIP1559TransactionTx, SignedTransaction, Transaction, TypedTransaction,
+    self, AccessListTx, EIP1559TransactionTx, ShardTransactionTx, SignedTransaction, Transaction, TypedTransaction,
     UnverifiedTransaction,
 };
 

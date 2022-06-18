@@ -1127,6 +1127,8 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
         // check if particualar transaction type is enabled at this block number in schedule
         match t.as_unsigned() {
+            // #[cfg(feature = "shard")]
+            TypedTransaction::ShardTransaction(_) => (), //shard transactions are always valid
             TypedTransaction::AccessList(_) => {
                 if !schedule.eip2930 {
                     return Err(ExecutionError::TransactionMalformed(
@@ -1222,7 +1224,17 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         }
 
         // TODO: we might need bigints here, or at least check overflows.
-        let balance = self.state.balance(&sender)?;
+
+        // #[cfg(feature = "shard")]
+        let balance = match t.as_unsigned() {
+            TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.balance {
+             Some(val) => val,
+                None => self.state.balance(&sender)?,
+            },
+            _ => self.state.balance(&sender)?,
+        };
+        // #[cfg(not(feature = "shard"))]
+        // let balance = self.state.balance(&sender)?;
         let gas_cost_effective = t
             .tx()
             .gas
@@ -1641,7 +1653,7 @@ mod tests {
         StorageDiff, Tracer, VMExecutedOperation, VMOperation, VMTrace, VMTracer,
     };
     use types::transaction::{
-        AccessListTx, Action, EIP1559TransactionTx, Transaction, TypedTransaction,
+        AccessListTx, Action, EIP1559TransactionTx, ShardTransactionTx, Transaction, TypedTransaction,
     };
     use vm::{ActionParams, ActionValue, CallType, CreateContractAddress, EnvInfo};
 

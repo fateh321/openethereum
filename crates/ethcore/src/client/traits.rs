@@ -407,6 +407,8 @@ pub trait BlockChainClient:
                             TypedTxId::Legacy => None,
                             TypedTxId::AccessList => None,
                             TypedTxId::EIP1559Transaction => Some(block.header().base_fee()),
+                            // #[cfg(feature = "shard")]
+                            TypedTxId::ShardTransaction => None,
                         }
                     }))
                 });

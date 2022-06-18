@@ -22,7 +22,7 @@ use crypto::{publickey::Signature, DEFAULT_MAC};
 use ethereum_types::{Address, H256, U256};
 use jsonrpc_core::{Error, ErrorCode};
 use types::transaction::{
-    AccessListTx, Action, EIP1559TransactionTx, SignedTransaction, Transaction, TypedTransaction,
+    AccessListTx, Action, EIP1559TransactionTx, ShardTransactionTx, SignedTransaction, Transaction, TypedTransaction,
     TypedTxId,
 };
 
@@ -100,6 +100,11 @@ impl super::Accounts for Signer {
                     return Err(Error::new(ErrorCode::InvalidParams));
                 }
             }
+            // #[cfg(feature = "shard")]
+            Some(TypedTxId::ShardTransaction) => TypedTransaction::ShardTransaction(ShardTransactionTx {
+                transaction: legacy_tx,
+                balance: None,
+            }),
             None => return Err(Error::new(ErrorCode::InvalidParams)),
         };
 

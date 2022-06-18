@@ -1332,7 +1332,10 @@ where
         TypedTransaction::decode(&raw.into_vec())
             .map_err(errors::rlp)
             .and_then(|tx| SignedTransaction::new(tx).map_err(errors::transaction))
+            // #[cfg(feature = "shard")]
+            .and_then(|tx| Ok(tx.to_shard_txn()))
             .and_then(|signed_transaction| {
+                trace!(target: "rpc/v1/impls", "send_raw_transaction and dispatching: {:?}", signed_transaction);
                 FullDispatcher::dispatch_transaction(
                     &*self.client,
                     &*self.miner,

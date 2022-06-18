@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Parity.  If not, see <http://www.gnu.org/licenses/>.
 
-use log::{trace, warn};
+use log::{trace, warn, debug};
 use std::{
     collections::{hash_map, BTreeSet, HashMap},
     slice,
@@ -144,6 +144,7 @@ where
         transaction: T,
         replace: &dyn ShouldReplace<T>,
     ) -> error::Result<Arc<T>, T::Hash> {
+        debug!(target: "pool", "Importing transaction ({:?})", transaction);
         let mem_usage = transaction.mem_usage();
 
         if self.by_hash.contains_key(transaction.hash()) {

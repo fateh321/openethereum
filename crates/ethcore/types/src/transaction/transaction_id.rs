@@ -22,6 +22,8 @@ use serde_repr::*;
 #[derive(Serialize_repr, Eq, Hash, Deserialize_repr, Debug, Copy, Clone, PartialEq)]
 #[repr(u8)]
 pub enum TypedTxId {
+    // #[cfg(feature = "shard")]
+    ShardTransaction = 0x03,
     EIP1559Transaction = 0x02,
     AccessList = 0x01,
     Legacy = 0x00,
@@ -34,12 +36,16 @@ impl TypedTxId {
             0 => Some(Self::Legacy),
             1 => Some(Self::AccessList),
             2 => Some(Self::EIP1559Transaction),
+            // #[cfg(feature = "shard")]
+            3 => Some(Self::ShardTransaction),
             _ => None,
         }
     }
 
     pub fn try_from_wire_byte(n: u8) -> Result<Self, ()> {
         match n {
+            // #[cfg(feature = "shard")]
+            x if x == TypedTxId::ShardTransaction as u8 => Ok(TypedTxId::ShardTransaction),
             x if x == TypedTxId::EIP1559Transaction as u8 => Ok(TypedTxId::EIP1559Transaction),
             x if x == TypedTxId::AccessList as u8 => Ok(TypedTxId::AccessList),
             x if (x & 0x80) != 0x00 => Ok(TypedTxId::Legacy),
@@ -54,6 +60,8 @@ impl TypedTxId {
             Some(0x00) => Some(Self::Legacy),
             Some(0x01) => Some(Self::AccessList),
             Some(0x02) => Some(Self::EIP1559Transaction),
+            // #[cfg(feature = "shard")]
+            Some(0x03) => Some(Self::ShardTransaction),
             _ => None,
         }
     }

@@ -95,6 +95,10 @@ pub enum Error {
     TransactionTypeNotEnabled,
     /// Transaction sender is not an EOA (see EIP-3607)
     SenderIsNotEOA,
+    // #[cfg(feature = "shard")]
+    /// Transaction sender's shard is different from Block producer
+    SenderInvalidShard,
+
 }
 
 impl From<crypto::publickey::Error> for Error {
@@ -157,6 +161,8 @@ impl fmt::Display for Error {
                 format!("Transaction type is not enabled for current block")
             }
             SenderIsNotEOA => "Transaction sender is not an EOA (see EIP-3607)".into(),
+            // #[cfg(feature = "shard")]
+            SenderInvalidShard => "Transaction sender's shard is different from Block producer".into()
         };
 
         f.write_fmt(format_args!("Transaction error ({})", msg))

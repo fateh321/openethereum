@@ -500,21 +500,393 @@ impl EIP1559TransactionTx {
         rlp.append(&self.encode(chain_id, Some(signature)));
     }
 }
+// #[cfg(feature = "shard")]
+#[derive(Debug, Clone, Eq, PartialEq, MallocSizeOf)]
+pub struct ShardTransactionTx {
+    pub transaction: Transaction,
+    //account balance
+    pub balance: Option<U256>,
+}
+// #[cfg(feature = "shard")]
+impl ShardTransactionTx {
+    pub fn new(transaction: Transaction, balance: Option<U256>) -> ShardTransactionTx {
+        ShardTransactionTx {
+            transaction,
+            balance,
+        }
+    }
+    pub fn tx_type(&self) -> TypedTxId {
+        TypedTxId::ShardTransaction
+    }
 
+    pub fn tx(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    pub fn tx_mut(&mut self) -> &mut Transaction {
+        &mut self.transaction
+    }
+    // Everything has been taken from Legacy instead of EIP1559
+    // fn decode(d: &Rlp) -> Result<UnverifiedTransaction, DecoderError> {
+    //     if (d.item_count()? != 9) ||(d.item_count()? != 10){
+    //         return Err(DecoderError::RlpIncorrectListLen);
+    //     }
+    //     // let hash = keccak(d.as_raw());
+    //
+    //     //let tx = TypedTransaction::Legacy(Self::decode_data(d, 0)?);
+    //     let tx = Transaction {
+    //         nonce: d.val_at(0)?,
+    //         gas_price: d.val_at( 1)?,
+    //         gas: d.val_at( 2)?,
+    //         action: d.val_at( 3)?,
+    //         value: d.val_at( 4)?,
+    //         data: d.val_at( 5)?,
+    //     };
+    //     // take V from signatuere and decompose it into chain_id and standard V.
+    //     let legacy_v: u64 = d.val_at(6)?;
+    //
+    //     let signature = SignatureComponents {
+    //         standard_v: signature::extract_standard_v(legacy_v),
+    //         r: d.val_at(7)?,
+    //         s: d.val_at(8)?,
+    //     };
+    //
+    //     let balance = if d.item_count()? == 10 {
+    //         Some(d.val_at(0)?)
+    //     } else {
+    //         None
+    //     };
+    //
+    //     Ok(UnverifiedTransaction::new(
+    //         TypedTransaction::ShardTransaction(ShardTransactionTx {
+    //             transaction: tx,
+    //             balance,
+    //         }),
+    //         signature::extract_chain_id_from_legacy_v(legacy_v),
+    //         signature,
+    //         H256::zero(),
+    //     )
+    //         .compute_hash())
+    // }
+    // fn decode_data(d: &Rlp, offset: usize) -> Result<Transaction, DecoderError> {
+    //     Ok(Transaction {
+    //         nonce: d.val_at(offset)?,
+    //         gas_price: d.val_at(offset + 1)?,
+    //         gas: d.val_at(offset + 2)?,
+    //         action: d.val_at(offset + 3)?,
+    //         value: d.val_at(offset + 4)?,
+    //         data: d.val_at(offset + 5)?,
+    //     })
+    // }
+
+    //EIP1559 inspired decoding but difficult to generate dummy transactions from web3js
+
+    pub fn decode(tx: &[u8]) -> Result<UnverifiedTransaction, DecoderError> {
+        let tx_rlp = &Rlp::new(tx);
+
+        // we need to have 11 or 10 items in this list
+        if (tx_rlp.item_count()? != 11) && (tx_rlp.item_count()? != 10){
+            // println!("item count is {:?}",tx_rlp.item_count());
+            return Err(DecoderError::RlpIncorrectListLen);
+        }
+
+        let chain_id = Some(tx_rlp.val_at(0)?);
+        // println!("hello");
+        // println!("chainId is {:?}",chain_id);
+        // let max_priority_fee_per_gas = tx_rlp.val_at(2)?;
+
+        let tx = Transaction {
+            nonce: tx_rlp.val_at(1)?,
+            gas_price: tx_rlp.val_at(2)?, //taken from max_fee_per_gas
+            gas: tx_rlp.val_at(3)?,
+            action: tx_rlp.val_at(4)?,
+            value: tx_rlp.val_at(5)?,
+            data: tx_rlp.val_at(6)?,
+        };
+
+        // we get signature part from here
+        let signature = SignatureComponents {
+            standard_v: tx_rlp.val_at(7)?,
+            r: tx_rlp.val_at(8)?,
+            s: tx_rlp.val_at(9)?,
+        };
+
+        let balance = if tx_rlp.item_count()? == 11 {
+             Some(tx_rlp.val_at(10)?)
+        } else {
+            None
+        };
+
+        // and here we create UnverifiedTransaction and calculate its hash
+        Ok(UnverifiedTransaction::new(
+            TypedTransaction::ShardTransaction(ShardTransactionTx {
+                transaction: tx,
+                balance,
+            }),
+            chain_id,
+            signature,
+            H256::zero(),
+        )
+            .compute_hash())
+    }
+    // fn encode(&self, chain_id: Option<u64>, signature: Option<&SignatureComponents>) -> Vec<u8> {
+    //     let mut stream = RlpStream::new();
+    //     self.encode_rlp(&mut stream, chain_id, signature);
+    //     stream.drain()
+    // }
+    fn encode_no_bal(&self, chain_id: Option<u64>, signature: Option<&SignatureComponents>) -> Vec<u8> {
+        let mut stream = RlpStream::new();
+        self.encode_rlp_no_bal(&mut stream, chain_id, signature);
+        stream.drain()
+    }
+    // pub fn rlp_append(
+    //     &self,
+    //     rlp: &mut RlpStream,
+    //     chain_id: Option<u64>,
+    //     signature: &SignatureComponents,
+    // ) {
+    //     self.encode_rlp(rlp, chain_id, Some(signature));
+    // }
+
+    // fn encode_rlp(
+    //     &self,
+    //     rlp: &mut RlpStream,
+    //     chain_id: Option<u64>,
+    //     signature: Option<&SignatureComponents>,
+    // ) {
+    //     let list_size = if chain_id.is_some() || signature.is_some() {
+    //         if self.balance.is_some(){
+    //             10
+    //         } else {
+    //             9
+    //         }
+    //     } else {
+    //         if self.balance.is_some() {
+    //             7
+    //         } else {
+    //             6
+    //         }
+    //     };
+    //     rlp.begin_list(list_size);
+    //
+    //     self.rlp_append_data_open(rlp);
+    //
+    //     //append signature if given. If not, try to append chainId.
+    //     if let Some(signature) = signature {
+    //         signature.rlp_append_with_chain_id(rlp, chain_id);
+    //     } else {
+    //         if let Some(n) = chain_id {
+    //             rlp.append(&n);
+    //             rlp.append(&0u8);
+    //             rlp.append(&0u8);
+    //         }
+    //     }
+    //     // append balance if any
+    //     if let Some(balance) = self.balance {
+    //         rlp.append(& balance);
+    //     }
+    //
+    // }
+    fn encode_rlp_no_bal(
+        &self,
+        rlp: &mut RlpStream,
+        chain_id: Option<u64>,
+        signature: Option<&SignatureComponents>,
+    ) {
+        let list_size = if chain_id.is_some() || signature.is_some() {
+            9
+        } else {
+            6
+        };
+        rlp.begin_list(list_size);
+
+        self.rlp_append_data_open(rlp);
+
+        //append signature if given. If not, try to append chainId.
+        if let Some(signature) = signature {
+            signature.rlp_append_with_chain_id(rlp, chain_id);
+        } else {
+            if let Some(n) = chain_id {
+                rlp.append(&n);
+                rlp.append(&0u8);
+                rlp.append(&0u8);
+            }
+        }
+    }
+    fn rlp_append_data_open(&self, s: &mut RlpStream) {
+        s.append(&self.tx().nonce);
+        s.append(&self.tx().gas_price);
+        s.append(&self.tx().gas);
+        s.append(&self.tx().action);
+        s.append(&self.tx().value);
+        s.append(&self.tx().data);
+    }
+    fn encode_payload(
+        &self,
+        chain_id: Option<u64>,
+        signature: Option<&SignatureComponents>,
+    ) -> RlpStream {
+        let mut stream = RlpStream::new();
+
+        let list_size = if signature.is_some() {
+            if self.balance.is_some(){
+                11
+            } else {
+                10
+            }
+        } else {
+            if self.balance.is_some() {
+                8
+            } else {
+                7
+            }
+        };
+        // rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, senderV, senderR, senderS, balance]])
+        stream.begin_list(list_size);
+
+        // append chain_id. from EIP-2930: chainId is defined to be an integer of arbitrary size.
+        stream.append(&(if let Some(n) = chain_id { n } else { 0 }));
+
+        stream.append(&self.tx().nonce);
+
+
+        stream.append(&self.tx().gas_price);
+        stream.append(&self.tx().gas);
+        stream.append(&self.tx().action);
+        stream.append(&self.tx().value);
+        stream.append(&self.tx().data);
+
+        // append signature if any
+        if let Some(signature) = signature {
+            signature.rlp_append(&mut stream);
+        }
+        // append balance if any
+        if let Some(balance) = self.balance {
+            stream.append(& balance);
+        }
+        stream
+    }
+    // for hashing purposes only, derived from eip1559
+    // fn encode_payload_no_bal(
+    //     &self,
+    //     chain_id: Option<u64>,
+    //     signature: Option<&SignatureComponents>,
+    // ) -> RlpStream {
+    //     let mut stream = RlpStream::new();
+    //
+    //     let list_size = if signature.is_some() {
+    //         10
+    //     } else {
+    //         7
+    //     };
+    //     stream.begin_list(list_size);
+    //
+    //     // append chain_id. from EIP-2930: chainId is defined to be an integer of arbitrary size.
+    //     stream.append(&(if let Some(n) = chain_id { n } else { 0 }));
+    //
+    //     stream.append(&self.tx().nonce);
+    //
+    //
+    //     stream.append(&self.tx().gas_price);
+    //     stream.append(&self.tx().gas);
+    //     stream.append(&self.tx().action);
+    //     stream.append(&self.tx().value);
+    //     stream.append(&self.tx().data);
+    //
+    //     // append signature if any
+    //     if let Some(signature) = signature {
+    //         signature.rlp_append(&mut stream);
+    //     }
+    //     // don't append balance
+    //
+    //     stream
+    // }
+    // encode by this payload spec: 0x03 | rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, senderV, senderR, senderS, balance]])
+    pub fn encode(
+        &self,
+        chain_id: Option<u64>,
+        signature: Option<&SignatureComponents>,
+    ) -> Vec<u8> {
+        let stream = self.encode_payload(chain_id, signature);
+        // make as vector of bytes
+        [&[TypedTxId::ShardTransaction as u8], stream.as_raw()].concat()
+    }
+    //
+    // pub fn encode_no_bal(
+    //     &self,
+    //     chain_id: Option<u64>,
+    //     signature: Option<&SignatureComponents>,
+    // ) -> Vec<u8> {
+    //     let stream = self.encode_payload_no_bal(chain_id, signature);
+    //     // make as vector of bytes
+    //     [&[TypedTxId::ShardTransaction as u8], stream.as_raw()].concat()
+    // }
+    pub fn rlp_append(
+        &self,
+        rlp: &mut RlpStream,
+        chain_id: Option<u64>,
+        signature: &SignatureComponents,
+    ) {
+        rlp.append(&self.encode(chain_id, Some(signature)));
+    }
+
+
+}
 #[derive(Debug, Clone, Eq, PartialEq, MallocSizeOf)]
 pub enum TypedTransaction {
     Legacy(Transaction),      // old legacy RLP encoded transaction
     AccessList(AccessListTx), // EIP-2930 Transaction with a list of addresses and storage keys that the transaction plans to access.
     // Accesses outside the list are possible, but become more expensive.
     EIP1559Transaction(EIP1559TransactionTx),
+    // #[cfg(feature = "shard")]
+    ShardTransaction(ShardTransactionTx),
+
 }
 
 impl TypedTransaction {
+    // #[cfg(feature = "shard")]
+    pub fn to_shard_txn(self) -> TypedTransaction{
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::Legacy( tx) => Self::ShardTransaction(ShardTransactionTx{
+                    transaction: tx,
+                    balance: None,
+                }),
+            _ => self,
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn is_shard(&self) -> bool {
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(_) => true,
+            _ => false,
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn with_balance(self, balance: U256) -> TypedTransaction{
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(mut tx) => {
+                match tx.balance {
+                    Some(_) => Self::ShardTransaction(tx),
+                    None => {
+                        tx.balance = Some(balance);
+                        Self::ShardTransaction(tx)
+                    }
+                }
+
+            },
+            _ => self,
+        }
+    }
     pub fn tx_type(&self) -> TypedTxId {
         match self {
             Self::Legacy(_) => TypedTxId::Legacy,
             Self::AccessList(_) => TypedTxId::AccessList,
             Self::EIP1559Transaction(_) => TypedTxId::EIP1559Transaction,
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(_) => TypedTxId::ShardTransaction,
         }
     }
 
@@ -524,6 +896,8 @@ impl TypedTransaction {
             Self::Legacy(tx) => tx.encode(chain_id, None),
             Self::AccessList(tx) => tx.encode(chain_id, None),
             Self::EIP1559Transaction(tx) => tx.encode(chain_id, None),
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(tx) => tx.encode_no_bal(chain_id, None),
         })
     }
 
@@ -613,6 +987,8 @@ impl TypedTransaction {
             Self::Legacy(tx) => tx,
             Self::AccessList(ocl) => ocl.tx(),
             Self::EIP1559Transaction(tx) => tx.tx(),
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(tx) => tx.tx(),
         }
     }
 
@@ -621,6 +997,9 @@ impl TypedTransaction {
             Self::Legacy(tx) => tx,
             Self::AccessList(ocl) => ocl.tx_mut(),
             Self::EIP1559Transaction(tx) => tx.tx_mut(),
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(tx) => tx.tx_mut(),
+
         }
     }
 
@@ -629,6 +1008,9 @@ impl TypedTransaction {
             Self::EIP1559Transaction(tx) => Some(&tx.transaction.access_list),
             Self::AccessList(tx) => Some(&tx.access_list),
             Self::Legacy(_) => None,
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(_) => None,
+
         }
     }
 
@@ -646,6 +1028,9 @@ impl TypedTransaction {
             }
             Self::AccessList(_) => self.tx().gas_price,
             Self::Legacy(_) => self.tx().gas_price,
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(_) => self.tx().gas_price,
+
         }
     }
 
@@ -654,6 +1039,8 @@ impl TypedTransaction {
             Self::EIP1559Transaction(tx) => tx.max_priority_fee_per_gas,
             Self::AccessList(tx) => tx.tx().gas_price,
             Self::Legacy(tx) => tx.gas_price,
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(tx) => tx.tx().gas_price,
         }
     }
 
@@ -670,6 +1057,9 @@ impl TypedTransaction {
             }
             Self::AccessList(tx) => tx.tx().gas_price.is_zero(),
             Self::Legacy(tx) => tx.gas_price.is_zero(),
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(tx) => tx.tx().gas_price.is_zero(),
+
         }
     }
 
@@ -684,6 +1074,8 @@ impl TypedTransaction {
         }
         // other transaction types
         match id.unwrap() {
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => ShardTransactionTx::decode(&tx[1..]),
             TypedTxId::EIP1559Transaction => EIP1559TransactionTx::decode(&tx[1..]),
             TypedTxId::AccessList => AccessListTx::decode(&tx[1..]),
             TypedTxId::Legacy => return Err(DecoderError::Custom("Unknown transaction legacy")),
@@ -736,6 +1128,8 @@ impl TypedTransaction {
             Self::Legacy(tx) => tx.rlp_append(s, chain_id, signature),
             Self::AccessList(opt) => opt.rlp_append(s, chain_id, signature),
             Self::EIP1559Transaction(tx) => tx.rlp_append(s, chain_id, signature),
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(tx) => tx.rlp_append(s, chain_id, signature),
         }
     }
 
@@ -752,6 +1146,19 @@ impl TypedTransaction {
             Self::Legacy(tx) => tx.encode(chain_id, signature),
             Self::AccessList(opt) => opt.encode(chain_id, signature),
             Self::EIP1559Transaction(tx) => tx.encode(chain_id, signature),
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(tx) => tx.encode(chain_id, signature),
+        }
+    }
+    // #[cfg(feature = "shard")]
+    fn encode_no_bal(&self, chain_id: Option<u64>, signature: &SignatureComponents) -> Vec<u8> {
+        let signature = Some(signature);
+        match self {
+            Self::Legacy(tx) => tx.encode(chain_id, signature),
+            Self::AccessList(opt) => opt.encode(chain_id, signature),
+            Self::EIP1559Transaction(tx) => tx.encode(chain_id, signature),
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(tx) => tx.encode_no_bal(chain_id, signature),
         }
     }
 }
@@ -821,10 +1228,18 @@ impl UnverifiedTransaction {
     pub fn encode(&self) -> Vec<u8> {
         self.unsigned.encode(self.chain_id, &self.signature)
     }
-
+    // #[cfg(feature = "shard")]
+    pub fn encode_no_bal(&self) -> Vec<u8> {
+        self.unsigned.encode_no_bal(self.chain_id, &self.signature)
+    }
     /// Used to compute hash of created transactions.
     pub fn compute_hash(mut self) -> UnverifiedTransaction {
-        let hash = keccak(&*self.encode());
+        // #[cfg(feature = "shard")]
+        let hash = match self.unsigned {
+            TypedTransaction::ShardTransaction(_) => keccak(&*self.encode_no_bal()),
+            _ => keccak(&*self.encode()),
+        };
+        // let hash = keccak(&*self.encode());
         self.hash = hash;
         self
     }
@@ -988,6 +1403,24 @@ impl SignedTransaction {
             tx.unsigned.rlp_append(s, tx.chain_id, &tx.signature);
         }
     }
+    // #[cfg(feature = "shard")]
+    pub fn with_balance(mut self, balance: U256) -> SignedTransaction{
+        self.transaction.unsigned = self.transaction.unsigned.with_balance(balance);
+        self
+    }
+    // #[cfg(feature = "shard")]
+    pub fn match_shard(&self, shard: u64) -> bool {
+        if self.transaction.unsigned.is_shard(){
+            shard == self.sender.to_low_u64_le().rem_euclid(1)
+        } else {
+            true
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn to_shard_txn(mut self) -> SignedTransaction{
+        self.transaction.unsigned = self.transaction.unsigned.to_shard_txn();
+        self
+    }
 }
 
 /// Signed Transaction that is a part of canon blockchain.
@@ -1040,6 +1473,11 @@ pub struct PendingTransaction {
 }
 
 impl PendingTransaction {
+    // #[cfg(feature = "shard")]
+    pub fn to_shard_txn(mut self) -> PendingTransaction{
+        self.transaction = self.transaction.to_shard_txn();
+        self
+    }
     /// Create a new pending transaction from signed transaction.
     pub fn new(signed: SignedTransaction, condition: Option<Condition>) -> Self {
         PendingTransaction {
@@ -1207,7 +1645,30 @@ mod tests {
         assert_eq!(Address::from(keccak(key.public())), t.sender());
         assert_eq!(t.chain_id(), Some(69));
     }
+    #[test]
+    fn should_encode_decode_shard_tx() {
+        use self::publickey::{Generator, Random};
+        let key = Random.generate();
+        let t = TypedTransaction::ShardTransaction(ShardTransactionTx::new(
+            Transaction {
+                action: Action::Create,
+                nonce: U256::from(42),
+                gas_price: U256::from(3000),
+                gas: U256::from(50_000),
+                value: U256::from(1),
+                data: b"Hello!".to_vec(),
+            },
+            None,
+        ))
+            .sign(&key.secret(), Some(69));
+        let encoded = t.encode();
 
+        let t_new =
+            TypedTransaction::decode(&encoded).expect("Error on UnverifiedTransaction decoder");
+        if t_new.unsigned != t.unsigned {
+            assert!(true, "encoded/decoded tx differs from original");
+        }
+    }
     #[test]
     fn should_encode_decode_access_list_tx() {
         use self::publickey::{Generator, Random};

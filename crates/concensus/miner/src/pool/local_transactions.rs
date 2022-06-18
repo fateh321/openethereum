@@ -143,6 +143,8 @@ impl LocalTransactionsList {
     }
 
     fn insert(&mut self, hash: H256, status: Status) {
+        debug!(target: "Local_tx_pool", "Adding txn (hash {:?})", hash);
+        debug!(target: "Local_tx_pool", "Transaction pool looks like {:?})", self);
         let result = self.transactions.insert(hash, status);
         if let Some(old) = result {
             if old.is_pending() {
@@ -174,6 +176,7 @@ impl txpool::Listener<Transaction> for LocalTransactionsList {
                 );
             }
         }
+        debug!(target: "own_tx", "LocalTxList looks like ({:?})", self);
     }
 
     fn rejected<H: fmt::Debug + fmt::LowerHex>(
@@ -240,6 +243,7 @@ impl txpool::Listener<Transaction> for LocalTransactionsList {
             .as_ref()
             .map(|checker| checker(tx.hash()))
             .unwrap_or(false);
+        // debug!(target: "own_tx", "In-chain looks like {:?})", self.in_chain.as_ref());
         if is_in_chain {
             info!(target: "own_tx", "Transaction mined (hash {:?})", tx.hash());
             self.insert(*tx.hash(), Status::Mined(tx.clone()));
@@ -247,6 +251,7 @@ impl txpool::Listener<Transaction> for LocalTransactionsList {
         }
 
         info!(target: "own_tx", "Transaction culled (hash {:?})", tx.hash());
+        debug!(target: "own_tx", "Transaction pool looks like {:?})", self);
         self.insert(*tx.hash(), Status::Culled(tx.clone()));
     }
 }

@@ -560,21 +560,36 @@ impl Miner {
 
         let block_start = Instant::now();
         debug!(target: "miner", "Attempting to push {} transactions.", engine_txs.len() + queue_txs.len());
-
+        // #[cfg(feature = "shard")]
         for transaction in engine_txs
             .into_iter()
             .chain(queue_txs.into_iter().map(|tx| tx.signed().clone()))
         {
             let start = Instant::now();
 
+            let hash_before = transaction.hash();
+            // let transaction = transaction.to_shard_txn();
             let hash = transaction.hash();
+            // debug!(target: "miner", "hash before {:?} and hash after {:?}", hash_before, hash);
+            debug!(target: "miner", "transaction looks like {:?}", transaction);
             let sender = transaction.sender();
+            // #[cfg(feature = "shard")]
+            let params = self.params.read().clone();
+            let _block_shard = params.author.to_low_u64_le().rem_euclid(1);
+            let match_shard = transaction.match_shard(_block_shard);
+            let result = match match_shard {
+              true =>   client
+                      .verify_for_pending_block(&transaction, &open_block.header)
+                      .map_err(| e | e.into())
+                      .and_then(| _ | open_block.push_transaction(transaction, None)),
+                  false => Err(Error(ErrorKind::Transaction(transaction::Error::SenderInvalidShard), Default::default())),
+              };
 
-            // Re-verify transaction again vs current state.
-            let result = client
-                .verify_for_pending_block(&transaction, &open_block.header)
-                .map_err(|e| e.into())
-                .and_then(|_| open_block.push_transaction(transaction, None));
+             // Re-verify transaction again vs current state.
+            // let result = client
+            //     .verify_for_pending_block(&transaction, &open_block.header)
+            //     .map_err(|e| e.into())
+            //     .and_then(|_| open_block.push_transaction(transaction, None));
 
             let took = start.elapsed();
 
@@ -631,6 +646,8 @@ impl Miner {
                 }
                 // already have transaction - ignore
                 Err(Error(ErrorKind::Transaction(transaction::Error::AlreadyImported), _)) => {}
+                // #[cfg(feature = "shard")]
+                Err(Error(ErrorKind::Transaction(transaction::Error::SenderInvalidShard), _)) => {debug!(target: "miner", "Transaction sent to wrong shard");}
                 Err(Error(ErrorKind::Transaction(transaction::Error::NotAllowed), _)) => {
                     not_allowed_transactions.insert(hash);
                     debug!(target: "miner", "Skipping non-allowed transaction for sender {:?}", hash);
@@ -1091,7 +1108,7 @@ impl miner::MinerService for Miner {
     ) -> Result<(), transaction::Error> {
         // note: you may want to use `import_claimed_local_transaction` instead of this one.
 
-        trace!(target: "own_tx", "Importing transaction: {:?}", pending);
+        trace!(target: "own_tx", "(miner.rs) Importing transaction: {:?}", pending);
 
         let client = self.pool_client(chain);
         let imported = self
@@ -1120,6 +1137,7 @@ impl miner::MinerService for Miner {
     ) -> Result<(), transaction::Error> {
         // treat the tx as local if the option is enabled, if we have the account, or if
         // the account is specified as a Prioritized Local Addresses
+        trace!(target: "own_tx", "(miner.rs) Importing claimed local transaction: {:?}", pending);
         let sender = pending.sender();
         let treat_as_local = trusted
             || !self.options.tx_queue_no_unfamiliar_locals
@@ -1489,6 +1507,7 @@ impl miner::MinerService for Miner {
             retracted
                 .par_iter()
                 .for_each(|hash| {
+                    trace!(target: "miner", "{} hash retracted", hash);
                     let block = chain.block(BlockId::Hash(*hash))
                         .expect("Client is sending message after commit to db and inserting to chain; the block is available; qed");
                     let txs = block.transactions()

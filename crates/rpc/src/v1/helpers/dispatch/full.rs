@@ -90,8 +90,10 @@ impl<C: miner::BlockChainClient, M: MinerService> FullDispatcher<C, M> {
         signed_transaction: PendingTransaction,
         trusted: bool,
     ) -> Result<H256> {
+        // #[cfg(feature = "shard")]
+        // let signed_transaction = signed_transaction.to_shard_txn();
         let hash = signed_transaction.transaction.hash();
-
+        trace!(target: "dispatch", "rpc dispatching transaction: {:?}", signed_transaction);
         // use `import_claimed_local_transaction` so we can decide (based on config flags) if we want to treat
         // it as local or not. Nodes with public RPC interfaces will want these transactions to be treated like
         // external transactions.

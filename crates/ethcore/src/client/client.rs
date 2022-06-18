@@ -766,7 +766,9 @@ impl Importer {
         state.sync_cache(&route.enacted, &route.retracted, is_canon);
         // Final commit to the DB
         // t_nb 9.11 Write Transaction to database (cached)
+        // trace!(target: "client", "transactions being pushed {}", batch);
         client.db.read().key_value().write_buffered(batch);
+
         // t_nb 9.12 commit changed to become current greatest by applying pending insertion updates (Sync point)
         chain.commit();
 
@@ -2818,6 +2820,7 @@ impl BlockChainClient for Client {
 
     fn transact(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error> {
         let signed = self.create_transaction(tx_request)?;
+        trace!(target: "client.rs", "Forwarding transaction request: {:?}", signed);
         self.importer
             .miner
             .import_own_transaction(self, signed.into())

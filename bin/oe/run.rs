@@ -194,7 +194,7 @@ pub fn execute(cmd: RunCmd, logger: Arc<RotatingLogger>) -> Result<RunningClient
 
     // display info about used pruning algorithm
     info!(
-        "State DB configuration: {}{}{}",
+        "State DB hello honey configuration: {}{}{}",
         Colour::White.bold().paint(algorithm.as_str()),
         match fat_db {
             true => Colour::White.bold().paint(" +Fat").to_string(),

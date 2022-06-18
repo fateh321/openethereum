@@ -89,6 +89,10 @@ impl<'a> TypedTransactionView<'a> {
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(0),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(0),
         }
     }
 
@@ -100,6 +104,10 @@ impl<'a> TypedTransactionView<'a> {
                 .rlp
                 .val_at(1),
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(1),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(1),
         }
@@ -115,6 +123,10 @@ impl<'a> TypedTransactionView<'a> {
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(3),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(2),
         }
     }
 
@@ -134,6 +146,8 @@ impl<'a> TypedTransactionView<'a> {
                     max_priority_fee_per_gas + block_base_fee.unwrap_or_default(),
                 )
             }
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => self.gas_price(),
         }
     }
 
@@ -157,6 +171,10 @@ impl<'a> TypedTransactionView<'a> {
                         .saturating_sub(block_base_fee.unwrap_or_default()),
                 )
             }
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => self
+                .gas_price()
+                .saturating_sub(block_base_fee.unwrap_or_default()),
         }
     }
 
@@ -170,6 +188,10 @@ impl<'a> TypedTransactionView<'a> {
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(4),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(3),
         }
     }
 
@@ -183,6 +205,10 @@ impl<'a> TypedTransactionView<'a> {
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(6),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(5),
         }
     }
 
@@ -196,6 +222,10 @@ impl<'a> TypedTransactionView<'a> {
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(7),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(6),
         }
     }
 
@@ -227,6 +257,19 @@ impl<'a> TypedTransactionView<'a> {
                     chain_id,
                 )
             }
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => {
+                let chain_id = match self.chain_id() {
+                    0 => None,
+                    n => Some(n),
+                };
+                signature::add_chain_replay_protection(
+                    view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                        .rlp
+                        .val_at(7),
+                    chain_id,
+                )
+            }
         };
         r as u8
     }
@@ -240,6 +283,10 @@ impl<'a> TypedTransactionView<'a> {
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(9),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(7),
         }
     }
 
@@ -253,6 +300,10 @@ impl<'a> TypedTransactionView<'a> {
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(10),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(8),
         }
     }
 
@@ -266,6 +317,10 @@ impl<'a> TypedTransactionView<'a> {
             TypedTxId::EIP1559Transaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
                 .rlp
                 .val_at(11),
+            // #[cfg(feature = "shard")]
+            TypedTxId::ShardTransaction => view!(Self, &self.rlp.rlp.data().unwrap()[1..])
+                .rlp
+                .val_at(9),
         }
     }
 }

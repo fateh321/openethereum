@@ -325,6 +325,7 @@ pub fn execute<D: Dispatcher + 'static>(
             let post_sign = move |with_token_signed: WithToken<SignedTransaction>| {
                 let (signed, token) = with_token_signed.into_tuple();
                 let signed_transaction = PendingTransaction::new(signed, condition);
+                trace!(target: "helpers/dispatch", "executing and dispatching: {:?}", signed_transaction);
                 cloned_dispatcher
                     .dispatch_transaction(signed_transaction)
                     .map(|hash| (hash, token))

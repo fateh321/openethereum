@@ -224,7 +224,7 @@ mod test {
     use tempdir::TempDir;
     use test_helpers;
     use types::transaction::{
-        AccessListTx, Action, EIP1559TransactionTx, Transaction, TypedTransaction,
+        AccessListTx, Action, EIP1559TransactionTx, ShardTransactionTx, Transaction, TypedTransaction,
     };
 
     /// Contract code: https://gist.github.com/VladLupashevskyi/84f18eabb1e4afadf572cf92af3e7e7f
