@@ -54,6 +54,7 @@ use log::{info, trace, warn};
 use parity_bytes::Bytes;
 use parity_util_mem::{allocators::new_malloc_size_ops, MallocSizeOf};
 use parking_lot::{Mutex, RwLock};
+use parking_lot::lock_api::RwLockWriteGuard;
 use rayon::prelude::*;
 use rlp::RlpStream;
 use rlp_compress::{blocks_swapper, compress, decompress};
@@ -276,6 +277,8 @@ pub struct BlockChain {
 
     /// Number of first block where EIP-1559 rules begin. New encoding/decoding block format.
     pub eip1559_transition: BlockNumber,
+    //new state root should be here
+    pub shard_state_root: RwLock<(H256, BlockNumber)>,
 }
 
 impl BlockProvider for BlockChain {
@@ -666,6 +669,7 @@ impl BlockChain {
             pending_block_details: RwLock::new(HashMap::new()),
             pending_transaction_addresses: RwLock::new(HashMap::new()),
             eip1559_transition,
+            shard_state_root: RwLock::new((H256::default(), 999u64)),
         };
 
         // load best block
@@ -1502,7 +1506,13 @@ impl BlockChain {
             );
         }
     }
+    pub fn change_shard_state_root(&self, state_root: H256, bn: BlockNumber){
+        let mut sr = self.shard_state_root.write();
+        {
+            *sr = (state_root,bn);
+        }
 
+    }
     /// t_nb 9.12 commit changed to become current greatest by applying pending insertion updates
     pub fn commit(&self) {
         let mut pending_best_ancient_block = self.pending_best_ancient_block.write();

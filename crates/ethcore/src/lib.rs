@@ -64,6 +64,7 @@ extern crate unexpected;
 extern crate using_queue;
 extern crate vm;
 extern crate wasm;
+extern crate hyperproofs;
 
 #[cfg(any(test, feature = "blooms-db"))]
 extern crate blooms_db;

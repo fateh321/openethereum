@@ -445,7 +445,7 @@ impl EthereumMachine {
             );
             return Err(transaction::Error::TooBig);
         }
-        debug!("tx.encode looks like {:?}", transaction);
+        // debug!("tx.encode looks like {:?}", transaction);
         let tx = TypedTransaction::decode(transaction)
             .map_err(|e| transaction::Error::InvalidRlp(e.to_string()))?;
 

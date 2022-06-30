@@ -147,6 +147,10 @@ impl Default for Header {
 }
 
 impl Header {
+    pub fn change_state_root( mut self,h:H256) -> Header{
+        self.state_root = h;
+        self
+    }
     /// Create a new, default-valued, header.
     pub fn new() -> Self {
         Self::default()

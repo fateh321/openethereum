@@ -69,7 +69,7 @@ extern crate parity_runtime;
 extern crate parity_version;
 extern crate prometheus;
 extern crate stats;
-
+extern crate hyperproofs;
 extern crate rpc_servers;
 
 #[macro_use]

@@ -1087,6 +1087,33 @@ impl BlockChainClient for TestBlockChainClient {
             .unwrap();
         Ok(SignedTransaction::new(transaction.with_signature(sig, chain_id)).unwrap())
     }
+    fn create_shard_transaction(
+        &self,
+        TransactionRequest {
+            action,
+            data,
+            gas,
+            gas_price,
+            nonce,
+        }: TransactionRequest,
+    ) -> Result<SignedTransaction, transaction::Error> {
+        let transaction = TypedTransaction::Legacy(Transaction {
+            nonce: nonce
+                .unwrap_or_else(|| self.latest_nonce(&self.miner.authoring_params().author)),
+            action,
+            gas: gas.unwrap_or(self.spec.gas_limit),
+            gas_price: gas_price.unwrap_or_else(U256::zero),
+            value: U256::default(),
+            data: data,
+        });
+        let chain_id = Some(self.spec.chain_id());
+        let sig = self
+            .spec
+            .engine
+            .sign(transaction.signature_hash(chain_id))
+            .unwrap();
+        Ok(SignedTransaction::new(transaction.with_signature(sig, chain_id)).unwrap())
+    }
 
     fn transact(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error> {
         let signed = self.create_transaction(tx_request)?;

@@ -485,7 +485,11 @@ pub trait BlockChainClient:
         &self,
         tx_request: TransactionRequest,
     ) -> Result<SignedTransaction, transaction::Error>;
-
+    // #[cfg(feature = "shard")]
+    fn create_shard_transaction(
+        &self,
+        tx_request: TransactionRequest,
+    ) -> Result<SignedTransaction, transaction::Error>;
     /// Schedule state-altering transaction to be executed on the next pending
     /// block with the given gas and nonce parameters.
     fn transact(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error>;

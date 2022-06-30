@@ -73,7 +73,10 @@ pub fn sign_call(request: CallRequest) -> Result<SignedTransaction, Error> {
         // #[cfg(feature = "shard")]
         Some(TypedTxId::ShardTransaction) => TypedTransaction::ShardTransaction(ShardTransactionTx {
             transaction:tx_legacy,
-            balance: None,
+            shard: 999u64,
+            shard_data_list:Vec::new(),
+            shard_proof_list:Vec::new(),
+            shard_proof: String::new(),
         }),
         _ => return Err(Error::new(ErrorCode::InvalidParams)),
     };

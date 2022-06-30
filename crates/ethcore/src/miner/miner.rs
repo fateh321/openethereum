@@ -17,8 +17,9 @@
 use std::{
     cmp,
     collections::{BTreeMap, BTreeSet, HashSet},
-    sync::Arc,
+    sync::{Arc,mpsc},
     time::{Duration, Instant},
+    thread,
 };
 
 use ansi_term::Colour;
@@ -36,6 +37,7 @@ use ethcore_miner::{
     },
     service_transaction_checker::ServiceTransactionChecker,
 };
+use hyperproofs::AggProof;
 use ethereum_types::{Address, H256, U256};
 use io::IoChannel;
 use miner::{
@@ -246,6 +248,10 @@ impl SealingWork {
 /// Handles preparing work for "work sealing" or seals "internally" if Engine does not require work.
 pub struct Miner {
     // NOTE [ToDr]  When locking always lock in this order!
+    // #[cfg(feature = "shard")]
+    pub channel_sender: Arc<Mutex<mpsc::Sender<String>>>,
+    pub channel_receiver: Arc<Mutex<mpsc::Receiver<String>>>,
+    pub proof_data: RwLock<Vec<(Address,U256)>>,
     sealing: Mutex<SealingWork>,
     params: RwLock<AuthoringParams>,
     #[cfg(feature = "work-notify")]
@@ -277,6 +283,8 @@ impl Miner {
 
     /// Creates new instance of miner Arc.
     pub fn new<A: LocalAccounts + 'static>(
+        sender: Arc<Mutex<mpsc::Sender<String>>>,
+        reciever: Arc<Mutex<mpsc::Receiver<String>>>,
         options: MinerOptions,
         gas_pricer: GasPricer,
         spec: &Spec,
@@ -291,6 +299,9 @@ impl Miner {
         let engine = spec.engine.clone();
 
         Miner {
+            channel_sender: sender,
+            channel_receiver: reciever,
+            proof_data: RwLock::new(Vec::new()),
             sealing: Mutex::new(SealingWork {
                 queue: UsingQueue::new(options.work_queue_size),
                 enabled: options.force_sealing
@@ -337,8 +348,13 @@ impl Miner {
         accounts: Option<HashSet<Address>>,
         force_sealing: bool,
     ) -> Miner {
+        let (tx,rx): (mpsc::Sender<String>, mpsc::Receiver<String>) = mpsc::channel();
+        let tx = Arc::new(Mutex::new(tx));
+        let rx = Arc::new(Mutex::new(rx));
         let minimal_gas_price = 0.into();
         Miner::new(
+                tx,
+            rx,
             MinerOptions {
                 pool_verification_options: pool::verifier::Options {
                     minimal_gas_price,
@@ -446,6 +462,8 @@ impl Miner {
     }
 
     /// Prepares new block for sealing including top transactions from queue.
+    // #[cfg(feature = "shard")]
+    //changing from self to mut self since we would need to change proof data
     fn prepare_block<C>(&self, chain: &C) -> Option<(ClosedBlock, Option<H256>)>
     where
         C: BlockChain + CallContract + BlockProducer + Nonce + Sync,
@@ -553,30 +571,54 @@ impl Miner {
                 enforce_priority_fees: true,
             },
         );
-
+        // #[cfg(feature = "shard")]
+        if block_number.clone().rem_euclid(AggProof::shard_count()) ==0 {
+            trace!(target:"miner", "block number is {}", block_number.clone());
+            if block_number.clone() != AggProof::get_last_commit_round(){
+                AggProof::commit(AggProof::get_shard(),0u64);
+                AggProof::set_last_commit_shard(block_number.clone());
+            }
+        }
         let took_ms = |elapsed: &Duration| {
             elapsed.as_secs() * 1000 + elapsed.subsec_nanos() as u64 / 1_000_000
         };
-
+        let block_shard = AggProof::get_shard();
         let block_start = Instant::now();
         debug!(target: "miner", "Attempting to push {} transactions.", engine_txs.len() + queue_txs.len());
         // #[cfg(feature = "shard")]
+        let (is_proof, proof) = if !self.proof_data.read().is_empty() {match self.channel_receiver.lock().recv() {
+            Ok(T) => (true,T),
+        _ => (false, String::new()),
+        }
+        }else {(false, String::new()) };
         for transaction in engine_txs
-            .into_iter()
+            .into_iter().map(|tx| if is_proof{
+            let pd = self.proof_data.read().clone();
+            //clear proof data from previous round
+            self.proof_data.write().clear();
+            AggProof::resetAddressCommit(block_shard);
+
+            println!("author shard is {}", block_shard);
+            tx.with_proof(pd,proof.clone()).with_shard(block_shard)
+        }else { tx.with_shard(block_shard) })
             .chain(queue_txs.into_iter().map(|tx| tx.signed().clone()))
         {
             let start = Instant::now();
-
+            let transaction = transaction.clean_shard();
             let hash_before = transaction.hash();
             // let transaction = transaction.to_shard_txn();
             let hash = transaction.hash();
             // debug!(target: "miner", "hash before {:?} and hash after {:?}", hash_before, hash);
-            debug!(target: "miner", "transaction looks like {:?}", transaction);
+            // debug!(target: "miner", "transaction looks like {:?}", transaction);
             let sender = transaction.sender();
+            let balance = open_block.state.balance(&sender).unwrap();
+            let shard_data = (sender.clone(),balance.clone());
             // #[cfg(feature = "shard")]
-            let params = self.params.read().clone();
-            let _block_shard = params.author.to_low_u64_le().rem_euclid(1);
-            let match_shard = transaction.match_shard(_block_shard);
+            // let params = self.params.read().clone();
+            // let _block_shard = AggProof::author_shard(&params.author);
+                // params.author.to_low_u64_be().rem_euclid(1);
+            let match_shard = transaction.match_shard(block_shard);
+            let _txn = transaction.clone();
             let result = match match_shard {
               true =>   client
                       .verify_for_pending_block(&transaction, &open_block.header)
@@ -647,7 +689,7 @@ impl Miner {
                 // already have transaction - ignore
                 Err(Error(ErrorKind::Transaction(transaction::Error::AlreadyImported), _)) => {}
                 // #[cfg(feature = "shard")]
-                Err(Error(ErrorKind::Transaction(transaction::Error::SenderInvalidShard), _)) => {debug!(target: "miner", "Transaction sent to wrong shard");}
+                Err(Error(ErrorKind::Transaction(transaction::Error::SenderInvalidShard), _)) => {debug!(target: "miner", "Transaction sent to wrong shard {} txn is {:?}", block_shard, _txn);}
                 Err(Error(ErrorKind::Transaction(transaction::Error::NotAllowed), _)) => {
                     not_allowed_transactions.insert(hash);
                     debug!(target: "miner", "Skipping non-allowed transaction for sender {:?}", hash);
@@ -660,9 +702,25 @@ impl Miner {
                     invalid_transactions.insert(hash);
                 }
                 // imported ok
-                _ => tx_count += 1,
+                // #[cfg(feature = "shard")]
+                // _ =>tx_count += 1,
+                  _ => {tx_count += 1;
+                      self.proof_data.write().push(shard_data);
+                      AggProof::pushAddressCommit(shard_data.0.to_low_u64_be().rem_euclid(2u64.pow(16)),block_shard);},
             }
         }
+        AggProof::updateTree(block_shard);
+        let tx_new = self.channel_sender.clone();
+        if !self.proof_data.read().is_empty() {
+            thread::spawn(move || {
+                let a = match AggProof::agg(block_shard.clone()) {
+                    Ok(t) => t.0,
+                    _ => String::new(),
+                };
+                tx_new.lock().send(a).unwrap();
+            });
+        };
+        println!("proof_data looks like{:?} and txn_count looks like {}", self.proof_data.read(), tx_count);
         let elapsed = block_start.elapsed();
         debug!(target: "miner", "Pushed {} transactions in {} ms", tx_count, took_ms(&elapsed));
 
@@ -960,6 +1018,7 @@ impl Miner {
 
     /// Prepare pending block, check whether sealing is needed, and then update sealing.
     fn prepare_and_update_sealing<C: miner::BlockChainClient>(&self, chain: &C) {
+        trace!(target: "miner", "prepare_and_updating_sealing: entering");
         // Make sure to do it after transaction is imported and lock is dropped.
         // We need to create pending block and enable sealing.
         let sealing_state = self.engine.sealing_state();
@@ -1683,7 +1742,10 @@ mod tests {
     }
 
     fn miner() -> Miner {
+        let (tx,rx): (mpsc::Sender<String>, mpsc::Receiver<String>) = mpsc::channel();
         Miner::new(
+            tx.clone(),
+            rx.clone(),
             MinerOptions {
                 force_sealing: false,
                 reseal_on_external_tx: false,
@@ -1893,8 +1955,10 @@ mod tests {
         let client = TestBlockChainClient::default();
         let mut local_accounts = ::std::collections::HashSet::new();
         local_accounts.insert(keypair.address());
-
+        let (tx,rx): (mpsc::Sender<String>, mpsc::Receiver<String>) = mpsc::channel();
         let miner = Miner::new(
+            tx.clone(),
+            rx.clone(),
             MinerOptions {
                 tx_queue_no_unfamiliar_locals: true,
                 ..miner().options
@@ -1995,7 +2059,10 @@ mod tests {
     fn should_prioritize_locals() {
         let client = TestBlockChainClient::default();
         let transaction = transaction();
+        let (tx,rx): (mpsc::Sender<String>, mpsc::Receiver<String>) = mpsc::channel();
         let miner = Miner::new(
+            tx.clone(),
+            rx.clone(),
             MinerOptions {
                 tx_queue_no_unfamiliar_locals: true, // should work even with this enabled
                 ..miner().options

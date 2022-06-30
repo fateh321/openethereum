@@ -17,7 +17,7 @@
 use std::{
     any::Any,
     str::FromStr,
-    sync::{atomic, Arc, Weak},
+    sync::{atomic, Arc, Weak,mpsc,},
     thread,
     time::{Duration, Instant},
 };
@@ -41,6 +41,7 @@ use crate::{
 };
 use ansi_term::Colour;
 use dir::{DatabaseDirectories, Directories};
+use hyperproofs::AggProof;
 use ethcore::{
     client::{BlockChainClient, BlockInfo, Client, DatabaseCompactionProfile, Mode, VMType},
     miner::{self, stratum, Miner, MinerOptions, MinerService},
@@ -49,7 +50,8 @@ use ethcore::{
 };
 use ethcore_logger::{Config as LogConfig, RotatingLogger};
 use ethcore_service::ClientService;
-use ethereum_types::{H256, U64};
+use ethereum_types::{H256, U64, U256, Address};
+use parking_lot::Mutex;
 use journaldb::Algorithm;
 use node_filter::NodeFilter;
 use parity_rpc::{informant, is_major_importing, NetworkSettings};
@@ -253,7 +255,11 @@ pub fn execute(cmd: RunCmd, logger: Arc<RotatingLogger>) -> Result<RunningClient
     sync_config.download_old_blocks = cmd.download_old_blocks;
     sync_config.eip1559_transition = spec.params().eip1559_transition;
     sync_config.new_transactions_stats_period = cmd.new_transactions_stats_period;
-
+    // #[cfg(feature = "shard")]
+    //here we add channels
+    let (tx,rx): (mpsc::Sender<String>, mpsc::Receiver<String>) = mpsc::channel();
+    let tx = Arc::new(Mutex::new(tx));
+    let rx = Arc::new(Mutex::new(rx));
     let passwords = passwords_from_files(&cmd.acc_conf.password_files)?;
 
     // prepare account provider
@@ -275,6 +281,8 @@ pub fn execute(cmd: RunCmd, logger: Arc<RotatingLogger>) -> Result<RunningClient
     let txpool_size = cmd.miner_options.pool_limits.max_count;
     // create miner
     let miner = Arc::new(Miner::new(
+        tx,
+        rx,
         cmd.miner_options,
         cmd.gas_pricer_conf
             .to_gas_pricer(fetch.clone(), runtime.executor()),
@@ -308,7 +316,20 @@ pub fn execute(cmd: RunCmd, logger: Arc<RotatingLogger>) -> Result<RunningClient
             miner.set_author(author);
         }
     }
-
+    // #[cfg(feature = "shard")]
+    //here we will add initVc for shard
+    AggProof::init(0u64);
+    //shard is 0u64 because these addresses don't matter.
+    AggProof::pushAddressDelta(u64::from_str_radix("0001",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
+    AggProof::pushAddressDelta(u64::from_str_radix("0002",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
+    AggProof::pushAddressDelta(u64::from_str_radix("0003",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
+    AggProof::pushAddressDelta(u64::from_str_radix("0004",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
+    AggProof::pushAddressDelta(u64::from_str_radix("F32E",16).unwrap().rem_euclid(2u64.pow(16)),String::from("10000000000000000000000"),Address::from_str("004ec07d2329997267Ec62b4166639513386F32E").unwrap().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+    AggProof::pushAddressDelta(u64::from_str_radix("17A1",16).unwrap().rem_euclid(2u64.pow(16)),String::from("10000000000000000000000"),Address::from_str("93a88B7893FCDb130ab9209f63AB2e6854e617A1").unwrap().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+    AggProof::set_author_shard(miner.authoring_params().author.clone());
+    AggProof::commit(AggProof::get_shard(), 0u64);
+    AggProof::updateTree(AggProof::get_shard());
+    AggProof::resetPrevCommit();
     // create client config
     let mut client_config = to_client_config(
         &cmd.cache_config,

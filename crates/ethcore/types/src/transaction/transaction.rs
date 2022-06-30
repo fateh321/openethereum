@@ -30,8 +30,14 @@ use std::{cmp::min, ops::Deref};
 pub type AccessListItem = (H160, Vec<H256>);
 pub type AccessList = Vec<AccessListItem>;
 
+pub type ShardProofItem = (H160, U256);
+pub type ShardProofList = Vec<ShardProofItem>;
+
+pub type ShardDataItem = (H160, U256);
+pub type ShardDataList = Vec<ShardDataItem>;
 use super::TypedTxId;
 
+use hyperproofs::AggProof;
 type Bytes = Vec<u8>;
 type BlockNumber = u64;
 
@@ -501,18 +507,27 @@ impl EIP1559TransactionTx {
     }
 }
 // #[cfg(feature = "shard")]
+
 #[derive(Debug, Clone, Eq, PartialEq, MallocSizeOf)]
 pub struct ShardTransactionTx {
     pub transaction: Transaction,
+    pub shard : u64,
+    pub shard_data_list: ShardDataList,
+    //only if there is a non-empty proof
+    pub shard_proof_list: ShardProofList,
+    pub shard_proof: String,
     //account balance
-    pub balance: Option<U256>,
+    // pub balance: Option<U256>,
 }
 // #[cfg(feature = "shard")]
 impl ShardTransactionTx {
-    pub fn new(transaction: Transaction, balance: Option<U256>) -> ShardTransactionTx {
+    pub fn new(transaction: Transaction, shard: u64, shard_data_list: ShardDataList, shard_proof_list:ShardProofList, shard_proof:String) -> ShardTransactionTx {
         ShardTransactionTx {
             transaction,
-            balance,
+            shard,
+            shard_data_list,
+            shard_proof_list,
+            shard_proof,
         }
     }
     pub fn tx_type(&self) -> TypedTxId {
@@ -526,66 +541,14 @@ impl ShardTransactionTx {
     pub fn tx_mut(&mut self) -> &mut Transaction {
         &mut self.transaction
     }
-    // Everything has been taken from Legacy instead of EIP1559
-    // fn decode(d: &Rlp) -> Result<UnverifiedTransaction, DecoderError> {
-    //     if (d.item_count()? != 9) ||(d.item_count()? != 10){
-    //         return Err(DecoderError::RlpIncorrectListLen);
-    //     }
-    //     // let hash = keccak(d.as_raw());
-    //
-    //     //let tx = TypedTransaction::Legacy(Self::decode_data(d, 0)?);
-    //     let tx = Transaction {
-    //         nonce: d.val_at(0)?,
-    //         gas_price: d.val_at( 1)?,
-    //         gas: d.val_at( 2)?,
-    //         action: d.val_at( 3)?,
-    //         value: d.val_at( 4)?,
-    //         data: d.val_at( 5)?,
-    //     };
-    //     // take V from signatuere and decompose it into chain_id and standard V.
-    //     let legacy_v: u64 = d.val_at(6)?;
-    //
-    //     let signature = SignatureComponents {
-    //         standard_v: signature::extract_standard_v(legacy_v),
-    //         r: d.val_at(7)?,
-    //         s: d.val_at(8)?,
-    //     };
-    //
-    //     let balance = if d.item_count()? == 10 {
-    //         Some(d.val_at(0)?)
-    //     } else {
-    //         None
-    //     };
-    //
-    //     Ok(UnverifiedTransaction::new(
-    //         TypedTransaction::ShardTransaction(ShardTransactionTx {
-    //             transaction: tx,
-    //             balance,
-    //         }),
-    //         signature::extract_chain_id_from_legacy_v(legacy_v),
-    //         signature,
-    //         H256::zero(),
-    //     )
-    //         .compute_hash())
-    // }
-    // fn decode_data(d: &Rlp, offset: usize) -> Result<Transaction, DecoderError> {
-    //     Ok(Transaction {
-    //         nonce: d.val_at(offset)?,
-    //         gas_price: d.val_at(offset + 1)?,
-    //         gas: d.val_at(offset + 2)?,
-    //         action: d.val_at(offset + 3)?,
-    //         value: d.val_at(offset + 4)?,
-    //         data: d.val_at(offset + 5)?,
-    //     })
-    // }
 
     //EIP1559 inspired decoding but difficult to generate dummy transactions from web3js
-
+    // rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, shard, shard_data_list, shard_proof_list, shard_proof, senderV, senderR, senderS]])
     pub fn decode(tx: &[u8]) -> Result<UnverifiedTransaction, DecoderError> {
         let tx_rlp = &Rlp::new(tx);
 
-        // we need to have 11 or 10 items in this list
-        if (tx_rlp.item_count()? != 11) && (tx_rlp.item_count()? != 10){
+        // we need to have 14 items in this list
+        if tx_rlp.item_count()? != 14{
             // println!("item count is {:?}",tx_rlp.item_count());
             return Err(DecoderError::RlpIncorrectListLen);
         }
@@ -603,25 +566,55 @@ impl ShardTransactionTx {
             value: tx_rlp.val_at(5)?,
             data: tx_rlp.val_at(6)?,
         };
+        // attaching shard
+        let shard_val = tx_rlp.val_at(7)?;
+        // shard data list we get from here
+        let datal_rlp = tx_rlp.at(8)?;
 
+        // shard_data_list pattern: [[{20 bytes}, {32 bytes}]...]
+        let mut datal: ShardDataList = Vec::new();
+
+        for i in 0..datal_rlp.item_count()? {
+            let datas = datal_rlp.at(i)?;
+
+            // check if there is list of 2 items
+            if datas.item_count()? != 2 {
+                return Err(DecoderError::Custom("Unknown shard data list length"));
+            }
+            datal.push((datas.val_at(0)?, datas.val_at(1)?));
+        }
+        // shard proof list we get from here
+        let proofl_rlp = tx_rlp.at(9)?;
+
+        // shard_proof_list pattern: [[{20 bytes}, {32 bytes}]...]
+        let mut proofl: ShardProofList = Vec::new();
+
+        for i in 0..proofl_rlp.item_count()? {
+            let datas = proofl_rlp.at(i)?;
+
+            // check if there is list of 2 items
+            if datas.item_count()? != 2 {
+                return Err(DecoderError::Custom("Unknown shard proof list length"));
+            }
+            proofl.push((datas.val_at(0)?, datas.val_at(1)?));
+        }
+        let proof = tx_rlp.val_at(10)?;
         // we get signature part from here
         let signature = SignatureComponents {
-            standard_v: tx_rlp.val_at(7)?,
-            r: tx_rlp.val_at(8)?,
-            s: tx_rlp.val_at(9)?,
+            standard_v: tx_rlp.val_at(11)?,
+            r: tx_rlp.val_at(12)?,
+            s: tx_rlp.val_at(13)?,
         };
 
-        let balance = if tx_rlp.item_count()? == 11 {
-             Some(tx_rlp.val_at(10)?)
-        } else {
-            None
-        };
 
         // and here we create UnverifiedTransaction and calculate its hash
         Ok(UnverifiedTransaction::new(
             TypedTransaction::ShardTransaction(ShardTransactionTx {
                 transaction: tx,
-                balance,
+                shard: shard_val,
+                shard_data_list: datal,
+                shard_proof_list: proofl,
+                shard_proof: proof,
             }),
             chain_id,
             signature,
@@ -629,64 +622,12 @@ impl ShardTransactionTx {
         )
             .compute_hash())
     }
-    // fn encode(&self, chain_id: Option<u64>, signature: Option<&SignatureComponents>) -> Vec<u8> {
-    //     let mut stream = RlpStream::new();
-    //     self.encode_rlp(&mut stream, chain_id, signature);
-    //     stream.drain()
-    // }
     fn encode_no_bal(&self, chain_id: Option<u64>, signature: Option<&SignatureComponents>) -> Vec<u8> {
         let mut stream = RlpStream::new();
         self.encode_rlp_no_bal(&mut stream, chain_id, signature);
         stream.drain()
     }
-    // pub fn rlp_append(
-    //     &self,
-    //     rlp: &mut RlpStream,
-    //     chain_id: Option<u64>,
-    //     signature: &SignatureComponents,
-    // ) {
-    //     self.encode_rlp(rlp, chain_id, Some(signature));
-    // }
 
-    // fn encode_rlp(
-    //     &self,
-    //     rlp: &mut RlpStream,
-    //     chain_id: Option<u64>,
-    //     signature: Option<&SignatureComponents>,
-    // ) {
-    //     let list_size = if chain_id.is_some() || signature.is_some() {
-    //         if self.balance.is_some(){
-    //             10
-    //         } else {
-    //             9
-    //         }
-    //     } else {
-    //         if self.balance.is_some() {
-    //             7
-    //         } else {
-    //             6
-    //         }
-    //     };
-    //     rlp.begin_list(list_size);
-    //
-    //     self.rlp_append_data_open(rlp);
-    //
-    //     //append signature if given. If not, try to append chainId.
-    //     if let Some(signature) = signature {
-    //         signature.rlp_append_with_chain_id(rlp, chain_id);
-    //     } else {
-    //         if let Some(n) = chain_id {
-    //             rlp.append(&n);
-    //             rlp.append(&0u8);
-    //             rlp.append(&0u8);
-    //         }
-    //     }
-    //     // append balance if any
-    //     if let Some(balance) = self.balance {
-    //         rlp.append(& balance);
-    //     }
-    //
-    // }
     fn encode_rlp_no_bal(
         &self,
         rlp: &mut RlpStream,
@@ -729,19 +670,11 @@ impl ShardTransactionTx {
         let mut stream = RlpStream::new();
 
         let list_size = if signature.is_some() {
-            if self.balance.is_some(){
-                11
-            } else {
-                10
-            }
+            14
         } else {
-            if self.balance.is_some() {
-                8
-            } else {
-                7
-            }
+            11
         };
-        // rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, senderV, senderR, senderS, balance]])
+        // rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, shard, shard_data_list, shard_proof_list, shard_proof, senderV, senderR, senderS]])
         stream.begin_list(list_size);
 
         // append chain_id. from EIP-2930: chainId is defined to be an integer of arbitrary size.
@@ -755,53 +688,31 @@ impl ShardTransactionTx {
         stream.append(&self.tx().action);
         stream.append(&self.tx().value);
         stream.append(&self.tx().data);
-
+        //attach shard
+        stream.append(&self.shard);
+        // shard data list
+        stream.begin_list(self.shard_data_list.len());
+        for data in self.shard_data_list.iter() {
+            stream.begin_list(2);
+            stream.append(&data.0);
+            stream.append(&data.1);
+        }
+        // shard proof list
+        stream.begin_list(self.shard_proof_list.len());
+        for stuff in self.shard_proof_list.iter() {
+            stream.begin_list(2);
+            stream.append(&stuff.0);
+            stream.append(&stuff.1);
+        }
+        stream.append(&self.shard_proof);
         // append signature if any
         if let Some(signature) = signature {
             signature.rlp_append(&mut stream);
         }
-        // append balance if any
-        if let Some(balance) = self.balance {
-            stream.append(& balance);
-        }
+
         stream
     }
-    // for hashing purposes only, derived from eip1559
-    // fn encode_payload_no_bal(
-    //     &self,
-    //     chain_id: Option<u64>,
-    //     signature: Option<&SignatureComponents>,
-    // ) -> RlpStream {
-    //     let mut stream = RlpStream::new();
-    //
-    //     let list_size = if signature.is_some() {
-    //         10
-    //     } else {
-    //         7
-    //     };
-    //     stream.begin_list(list_size);
-    //
-    //     // append chain_id. from EIP-2930: chainId is defined to be an integer of arbitrary size.
-    //     stream.append(&(if let Some(n) = chain_id { n } else { 0 }));
-    //
-    //     stream.append(&self.tx().nonce);
-    //
-    //
-    //     stream.append(&self.tx().gas_price);
-    //     stream.append(&self.tx().gas);
-    //     stream.append(&self.tx().action);
-    //     stream.append(&self.tx().value);
-    //     stream.append(&self.tx().data);
-    //
-    //     // append signature if any
-    //     if let Some(signature) = signature {
-    //         signature.rlp_append(&mut stream);
-    //     }
-    //     // don't append balance
-    //
-    //     stream
-    // }
-    // encode by this payload spec: 0x03 | rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, senderV, senderR, senderS, balance]])
+    // encode by this payload spec: 0x03 | rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, shard, shard_data_list, shard_proof_list, shard_proof, senderV, senderR, senderS]])
     pub fn encode(
         &self,
         chain_id: Option<u64>,
@@ -811,16 +722,7 @@ impl ShardTransactionTx {
         // make as vector of bytes
         [&[TypedTxId::ShardTransaction as u8], stream.as_raw()].concat()
     }
-    //
-    // pub fn encode_no_bal(
-    //     &self,
-    //     chain_id: Option<u64>,
-    //     signature: Option<&SignatureComponents>,
-    // ) -> Vec<u8> {
-    //     let stream = self.encode_payload_no_bal(chain_id, signature);
-    //     // make as vector of bytes
-    //     [&[TypedTxId::ShardTransaction as u8], stream.as_raw()].concat()
-    // }
+
     pub fn rlp_append(
         &self,
         rlp: &mut RlpStream,
@@ -845,12 +747,36 @@ pub enum TypedTransaction {
 
 impl TypedTransaction {
     // #[cfg(feature = "shard")]
-    pub fn to_shard_txn(self) -> TypedTransaction{
+    pub fn conatins_balance(&self) -> bool{
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction( tx) => if tx.shard_data_list.len() != 0{
+                true
+            } else {
+                false
+            },
+            _ => false,
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn shard_id(&self) -> u64{
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction( tx) => tx.shard.clone(),
+            _ => 999u64,
+        }
+    }
+
+    // #[cfg(feature = "shard")]
+    pub fn to_shard_txn(self, address: Address) -> TypedTransaction{
         match self {
             // #[cfg(feature = "shard")]
             Self::Legacy( tx) => Self::ShardTransaction(ShardTransactionTx{
                     transaction: tx,
-                    balance: None,
+                    shard: address.to_low_u64_be().rem_euclid(AggProof::shard_count()),
+                    shard_data_list: Vec::new(),
+                    shard_proof_list: Vec::new(),
+                    shard_proof: String::new(),
                 }),
             _ => self,
         }
@@ -864,18 +790,54 @@ impl TypedTransaction {
         }
     }
     // #[cfg(feature = "shard")]
-    pub fn with_balance(self, balance: U256) -> TypedTransaction{
+    pub fn with_balance(self, sender:Address, balance: U256) -> TypedTransaction{
         match self {
             // #[cfg(feature = "shard")]
             Self::ShardTransaction(mut tx) => {
-                match tx.balance {
-                    Some(_) => Self::ShardTransaction(tx),
-                    None => {
-                        tx.balance = Some(balance);
+                match tx.shard_data_list.len() {
+                    0 => {
+                        tx.shard_data_list.push((sender,balance));
                         Self::ShardTransaction(tx)
-                    }
+                    },
+                    _ => Self::ShardTransaction(tx),
                 }
 
+            },
+            _ => self,
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn with_proof(self, proof_data: Vec<(Address,U256)>, proof:String) -> TypedTransaction{
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(mut tx) => {
+                tx.shard_proof_list.extend( proof_data);
+                tx.shard_proof = proof;
+                Self::ShardTransaction(tx)
+            },
+            _ => self,
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn with_shard(self, shard: u64) -> TypedTransaction{
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(mut tx) => {
+                tx.shard = shard;
+                Self::ShardTransaction(tx)
+            },
+            _ => self,
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn clean_shard(self, address: Address) -> TypedTransaction{
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction(mut tx) => {
+                if tx.shard == 999u64 {
+                    tx.shard = address.to_low_u64_be().rem_euclid(AggProof::shard_count());
+                }
+                Self::ShardTransaction(tx)
             },
             _ => self,
         }
@@ -1132,7 +1094,6 @@ impl TypedTransaction {
             Self::ShardTransaction(tx) => tx.rlp_append(s, chain_id, signature),
         }
     }
-
     pub fn rlp_append_list(s: &mut RlpStream, tx_list: &[UnverifiedTransaction]) {
         s.begin_list(tx_list.len());
         for tx in tx_list.iter() {
@@ -1405,21 +1366,53 @@ impl SignedTransaction {
     }
     // #[cfg(feature = "shard")]
     pub fn with_balance(mut self, balance: U256) -> SignedTransaction{
-        self.transaction.unsigned = self.transaction.unsigned.with_balance(balance);
+        self.transaction.unsigned = self.transaction.unsigned.with_balance(self.sender,balance);
+        self
+    }
+    // #[cfg(feature = "shard")]
+    pub fn shard_proof_data(&self)->Vec<ShardProofItem>{
+        match &self.transaction.unsigned {
+            TypedTransaction::ShardTransaction(tx) => tx.shard_proof_list.clone(),
+            _ => Vec::new(),
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn shard_proof(&self)->String{
+        match &self.transaction.unsigned {
+            TypedTransaction::ShardTransaction(tx) => tx.shard_proof.clone(),
+            _ => String::new(),
+        }
+    }
+    // #[cfg(feature = "shard")]
+    pub fn with_proof(mut self, proof_data: Vec<(Address,U256)>, proof: String) -> SignedTransaction{
+        self.transaction.unsigned = self.transaction.unsigned.with_proof(proof_data, proof);
+        self
+    }
+    // #[cfg(feature = "shard")]
+    pub fn with_shard(mut self, shard: u64) -> SignedTransaction{
+        self.transaction.unsigned = self.transaction.unsigned.with_shard(shard);
         self
     }
     // #[cfg(feature = "shard")]
     pub fn match_shard(&self, shard: u64) -> bool {
         if self.transaction.unsigned.is_shard(){
-            shard == self.sender.to_low_u64_le().rem_euclid(1)
+            shard == self.transaction.unsigned.shard_id()
         } else {
             true
         }
     }
     // #[cfg(feature = "shard")]
     pub fn to_shard_txn(mut self) -> SignedTransaction{
-        self.transaction.unsigned = self.transaction.unsigned.to_shard_txn();
+        self.transaction.unsigned = self.transaction.unsigned.to_shard_txn(self.sender.clone());
         self
+    }
+    pub fn clean_shard(mut self) -> SignedTransaction{
+        self.transaction.unsigned = self.transaction.unsigned.clean_shard(self.sender.clone());
+        self
+    }
+    // #[cfg(feature = "shard")]
+    pub fn contains_balance(& self) -> bool{
+        self.transaction.unsigned.conatins_balance()
     }
 }
 
@@ -1658,7 +1651,10 @@ mod tests {
                 value: U256::from(1),
                 data: b"Hello!".to_vec(),
             },
-            None,
+            999u64,
+            Vec::new(),
+            Vec::new(),
+            String::from("hello bitches"),
         ))
             .sign(&key.secret(), Some(69));
         let encoded = t.encode();

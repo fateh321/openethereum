@@ -336,6 +336,9 @@ impl Importer {
                 // t_nb 7.0 check and lock block
                 match self.check_and_lock_block(&bytes, block, client) {
                     Ok((closed_block, pending)) => {
+                        //replace the header form the enacted block
+                        // shard
+                        // let header = closed_block.header.clone();
                         imported_blocks.push(hash);
                         let transactions_len = closed_block.transactions.len();
                         trace!(target:"block_import","Block #{}({}) check pass",header.number(),header.hash());
@@ -572,7 +575,9 @@ impl Importer {
             warn!(target: "client", "Stage 5 block verification failed for #{} ({})\nError: {:?}", header.number(), header.hash(), e);
             bail!(e);
         }
-
+        //after verification passes, pass on the new header with new state
+        //shard
+        // let header = locked_block.header.clone();
         let pending = self.check_epoch_end_signal(
             &header,
             bytes,
@@ -771,7 +776,7 @@ impl Importer {
 
         // t_nb 9.12 commit changed to become current greatest by applying pending insertion updates (Sync point)
         chain.commit();
-
+         println!("block looklike {:?}",block.header);
         // t_nb 9.13 check epoch end. Related only to AuRa and it seems light engine
         self.check_epoch_end(&header, &finalized, &chain, client);
 
@@ -782,7 +787,9 @@ impl Importer {
         if let Err(e) = client.prune_ancient(state, &chain) {
             warn!("Failed to prune ancient state data: {}", e);
         }
-
+        // change the header in change
+        //shard
+        chain.change_shard_state_root(block.header.state_root().clone(), block.header.number());
         route
     }
 
@@ -1351,9 +1358,11 @@ impl Client {
         // because of this we are just taking 5 tries to get best state in most cases it will work on first try.
         while nb_tries != 0 {
             let header = self.best_block_header();
+            let state_root = self.chain.read().shard_state_root.read().clone();
+            trace!(target: "client", "header looks like {:?}", header);
             match State::from_existing(
                 self.state_db.read().boxed_clone_canon(&header.hash()),
-                *header.state_root(),
+                if header.number() == state_root.1{ state_root.0} else { *header.state_root() },
                 self.engine.account_start_nonce(header.number()),
                 self.factories.clone(),
             ) {
@@ -2817,7 +2826,44 @@ impl BlockChainClient for Client {
             transaction.with_signature(signature, chain_id),
         )?)
     }
-
+    // #[cfg(feature = "shard")]
+    fn create_shard_transaction(
+        &self,
+        TransactionRequest {
+            action,
+            data,
+            gas,
+            gas_price,
+            nonce,
+        }: TransactionRequest,
+    ) -> Result<SignedTransaction, transaction::Error> {
+        let authoring_params = self.importer.miner.authoring_params();
+        let service_transaction_checker = self.importer.miner.service_transaction_checker();
+        let gas_price = if let Some(checker) = service_transaction_checker {
+            match checker.check_address(self, authoring_params.author) {
+                Ok(true) => U256::zero(),
+                _ => gas_price.unwrap_or_else(|| self.importer.miner.sensible_gas_price()),
+            }
+        } else {
+            self.importer.miner.sensible_gas_price()
+        };
+        let transaction = TypedTransaction::Legacy(transaction::Transaction {
+            nonce: nonce.unwrap_or_else(|| self.latest_nonce(&authoring_params.author)),
+            action,
+            gas: gas.unwrap_or_else(|| self.importer.miner.sensible_gas_limit()),
+            gas_price,
+            value: U256::zero(),
+            data,
+        });
+        let chain_id = self.engine.signing_chain_id(&self.latest_env_info());
+        let signature = self
+            .engine
+            .sign(transaction.signature_hash(chain_id))
+            .map_err(|e| transaction::Error::InvalidSignature(e.to_string()))?;
+        Ok(SignedTransaction::new(
+            transaction.to_shard_txn(authoring_params.author).with_signature(signature, chain_id),
+        )?)
+    }
     fn transact(&self, tx_request: TransactionRequest) -> Result<(), transaction::Error> {
         let signed = self.create_transaction(tx_request)?;
         trace!(target: "client.rs", "Forwarding transaction request: {:?}", signed);
@@ -2982,9 +3028,16 @@ impl PrepareOpenBlock for Client {
         let chain = self.chain.read();
         let best_header = chain.best_block_header();
         let h = best_header.hash();
-
+        //only propagate the real shard state root
+        let state_root = chain.shard_state_root.read().clone();
+        let sr;
+        if state_root.1 == best_header.number() && state_root.1>2{
+            sr = state_root.0.clone();
+        }else {
+            sr = best_header.state_root().clone();
+        }
         let is_epoch_begin = chain.epoch_transition(best_header.number(), h).is_some();
-        let mut open_block = OpenBlock::new(
+        let mut open_block = OpenBlock::new_shard(
             engine,
             self.factories.clone(),
             self.tracedb.read().tracing_enabled(),
@@ -2996,6 +3049,7 @@ impl PrepareOpenBlock for Client {
             extra_data,
             is_epoch_begin,
             chain.ancestry_with_metadata_iter(best_header.hash()),
+            sr,
         )?;
 
         // Add uncles

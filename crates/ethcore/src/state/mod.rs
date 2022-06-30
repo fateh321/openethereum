@@ -43,6 +43,7 @@ use types::{
     transaction::SignedTransaction,
 };
 
+use hyperproofs::AggProof;
 use vm::EnvInfo;
 
 use bytes::Bytes;
@@ -819,16 +820,20 @@ impl<B: Backend> State<B> {
         incr: &U256,
         cleanup_mode: CleanupMode,
     ) -> TrieResult<()> {
-        trace!(target: "state", "add_balance({}, {}): {}", a, incr, self.balance(a)?);
-        let is_value_transfer = !incr.is_zero();
-        if is_value_transfer || (cleanup_mode == CleanupMode::ForceCreate && !self.exists(a)?) {
-            self.require(a, false)?.add_balance(incr);
-        } else if let CleanupMode::TrackTouched(set) = cleanup_mode {
-            if self.exists(a)? {
-                set.insert(*a);
-                self.touch(a)?;
+        if a.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+            trace!(target: "state", "add_balance({}, {}): {}", a, incr, self.balance(a)?);
+            let is_value_transfer = !incr.is_zero();
+            if is_value_transfer || (cleanup_mode == CleanupMode::ForceCreate && !self.exists(a)?) {
+                self.require(a, false)?.add_balance(incr);
+            } else if let CleanupMode::TrackTouched(set) = cleanup_mode {
+                if self.exists(a)? {
+                    set.insert(*a);
+                    self.touch(a)?;
+                }
             }
         }
+        AggProof::pushAddressDelta(a.to_low_u64_be().rem_euclid(2u64.pow(16)), incr.to_string(), a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+        println!("increasing {} from address {} in shard {}", incr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
         Ok(())
     }
 
@@ -839,13 +844,21 @@ impl<B: Backend> State<B> {
         decr: &U256,
         cleanup_mode: &mut CleanupMode,
     ) -> TrieResult<()> {
-        trace!(target: "state", "sub_balance({}, {}): {}", a, decr, self.balance(a)?);
-        if !decr.is_zero() || !self.exists(a)? {
-            self.require(a, false)?.sub_balance(decr);
+        if a.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+            trace!(target: "state", "sub_balance({}, {}): {}", a, decr, self.balance(a)?);
+            if !decr.is_zero() || !self.exists(a)? {
+                self.require(a, false)?.sub_balance(decr);
+            }
+            if let CleanupMode::TrackTouched(ref mut set) = *cleanup_mode {
+                set.insert(*a);
+            }
+
         }
-        if let CleanupMode::TrackTouched(ref mut set) = *cleanup_mode {
-            set.insert(*a);
-        }
+        let mut neg = String::from("-");
+        let val = decr.to_string();
+        neg.push_str(&val);
+        AggProof::pushAddressDelta(a.to_low_u64_be().rem_euclid(2u64.pow(16)), neg.clone(), a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+        println!("decreasing {} from address {} in shard {}", decr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
         Ok(())
     }
 

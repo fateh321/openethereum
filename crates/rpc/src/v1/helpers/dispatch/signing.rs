@@ -103,7 +103,10 @@ impl super::Accounts for Signer {
             // #[cfg(feature = "shard")]
             Some(TypedTxId::ShardTransaction) => TypedTransaction::ShardTransaction(ShardTransactionTx {
                 transaction: legacy_tx,
-                balance: None,
+                shard: 999u64,
+                shard_data_list: Vec::new(),
+                shard_proof_list: Vec::new(),
+                shard_proof: String::new(),
             }),
             None => return Err(Error::new(ErrorCode::InvalidParams)),
         };

@@ -49,6 +49,7 @@ use vm::{EnvInfo, LastHashes};
 
 use hash::keccak;
 use rlp::{encode_list, RlpStream};
+use hyperproofs::AggProof;
 use types::{
     header::{ExtendedHeader, Header},
     receipt::{TransactionOutcome, TypedReceipt},
@@ -162,6 +163,64 @@ pub trait Drain {
 }
 
 impl<'x> OpenBlock<'x> {
+    pub fn new_shard<'a, I: IntoIterator<Item = ExtendedHeader>>(
+        engine: &'x dyn EthEngine,
+        factories: Factories,
+        tracing: bool,
+        db: StateDB,
+        parent: &Header,
+        last_hashes: Arc<LastHashes>,
+        author: Address,
+        gas_range_target: (U256, U256),
+        extra_data: Bytes,
+        is_epoch_begin: bool,
+        ancestry: I,
+        state_root:H256,
+    ) -> Result<Self, Error> {
+        let number = parent.number() + 1;
+
+        // t_nb 8.1.1 get parent StateDB.
+        let state = State::from_existing(
+            db,
+            state_root.clone(),
+            engine.account_start_nonce(number),
+            factories,
+        )?;
+        let mut r = OpenBlock {
+            block: ExecutedBlock::new(state, last_hashes, tracing),
+            engine: engine,
+        };
+
+        r.block.header.set_parent_hash(parent.hash());
+        r.block.header.set_number(number);
+        r.block.header.set_author(author);
+        r.block
+            .header
+            .set_timestamp(engine.open_block_header_timestamp(parent.timestamp()));
+        r.block.header.set_extra_data(extra_data);
+        r.block
+            .header
+            .set_base_fee(engine.calculate_base_fee(parent));
+
+        let gas_floor_target = cmp::max(gas_range_target.0, engine.params().min_gas_limit);
+        let gas_ceil_target = cmp::max(gas_range_target.1, gas_floor_target);
+
+        // t_nb 8.1.2 It calculated child gas limits should be.
+        engine.machine().populate_from_parent(
+            &mut r.block.header,
+            parent,
+            gas_floor_target,
+            gas_ceil_target,
+        );
+        // t_nb 8.1.3 this adds engine specific things
+        engine.populate_from_parent(&mut r.block.header, parent);
+
+        // t_nb 8.1.3 updating last hashes and the DAO fork, for ethash.
+        engine.machine().on_new_block(&mut r.block)?;
+        engine.on_new_block(&mut r.block, is_epoch_begin, &mut ancestry.into_iter())?;
+
+        Ok(r)
+    }
     /// t_nb 8.1 Create a new `OpenBlock` ready for transaction pushing.
     pub fn new<'a, I: IntoIterator<Item = ExtendedHeader>>(
         engine: &'x dyn EthEngine,
@@ -266,13 +325,31 @@ impl<'x> OpenBlock<'x> {
         if self.block.transactions_set.contains(&t.hash()) {
             return Err(TransactionError::AlreadyImported.into());
         }
+        // #[cfg(feature = "shard")]
+        //here we will verify the proof if any
+        let data = t.shard_proof_data();
+        if !data.is_empty(){
+            println!("data looks like{:?}", data);
+            AggProof::resetAddressBalanceVerify(t.shard_id());
+            for datum in data{
+                println!("address looks like{} balance looks like {} shard looks like {}",datum.0.to_low_u64_be().rem_euclid(2u64.pow(16)),datum.1, t.shard_id());
+                AggProof::pushAddressBalanceVerify(datum.0.to_low_u64_be().rem_euclid(2u64.pow(16)),datum.1.to_string(),t.shard_id());
+            }
+            let proof_result = AggProof::verifyProof(t.shard_proof(),t.shard_id(),0u64);
+            println!("verification is {:?}", proof_result);
 
+        }
         let env_info = self.block.env_info();
         // #[cfg(feature = "shard")]
         let sender = t.sender();
-        debug!(target: "miner", "transaction looks like {:?}", t);
-        let balance = self.state.balance(&sender)?;
-        let t = t.with_balance(balance);
+        // debug!(target: "miner", "transaction looks like {:?}", t);
+        let t= if !t.contains_balance(){
+            let balance = self.state.balance(&sender)?;
+            t.with_balance(balance)
+        } else{
+            t
+        };
+
         let outcome = self.block.state.apply(
             &env_info,
             self.engine.machine(),
@@ -379,6 +456,10 @@ impl<'x> OpenBlock<'x> {
         let uncle_bytes = encode_list(&s.block.uncles);
         s.block.header.set_uncles_hash(keccak(&uncle_bytes));
         s.block.header.set_state_root(s.block.state.root().clone());
+        // #[cfg(feature = "shard")]
+        // we set state root to default value for all nodes
+        // s.block.header.set_state_root(H256::default());
+        debug!(target: "block", "Adding block state root {:?}",s.block.state.root().clone());
         s.block.header.set_receipts_root(ordered_trie_root(
             s.block.receipts.iter().map(|r| r.encode()),
         ));
@@ -577,7 +658,15 @@ pub(crate) fn enact(
         trace!(target: "enact", "num={}, root={}, author={}, author_balance={}\n",
 				b.block.header.number(), s.root(), b.header.author(), author_balance);
     }
-
+    // #[cfg(feature = "shard")]
+    let block_number = b.block.header.number().clone();
+    if block_number.rem_euclid(AggProof::shard_count()) ==0{
+        trace!(target:"enact", "block number is {}", block_number);
+        if block_number != AggProof::get_last_commit_round(){
+            AggProof::commit(AggProof::get_shard(),0u64);
+            AggProof::set_last_commit_shard(block_number);
+        }
+    }
     // t_nb 8.2 transfer all field from current header to OpenBlock header that we created
     b.populate_from(&header);
 

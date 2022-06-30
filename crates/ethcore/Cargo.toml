@@ -80,7 +80,7 @@ walkdir = "2.3"
 wasm = { path = "../vm/wasm" }
 derive_more = "0.99"
 scopeguard = "1.1.0"
-
+hyperproofs = {path = "../hyperproofs"}
 [dev-dependencies]
 blooms-db = { path = "../db/blooms-db" }
 criterion = "0.2"

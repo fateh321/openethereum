@@ -144,7 +144,7 @@ impl LocalTransactionsList {
 
     fn insert(&mut self, hash: H256, status: Status) {
         debug!(target: "Local_tx_pool", "Adding txn (hash {:?})", hash);
-        debug!(target: "Local_tx_pool", "Transaction pool looks like {:?})", self);
+        // debug!(target: "Local_tx_pool", "Transaction pool looks like {:?})", self);
         let result = self.transactions.insert(hash, status);
         if let Some(old) = result {
             if old.is_pending() {
@@ -251,7 +251,7 @@ impl txpool::Listener<Transaction> for LocalTransactionsList {
         }
 
         info!(target: "own_tx", "Transaction culled (hash {:?})", tx.hash());
-        debug!(target: "own_tx", "Transaction pool looks like {:?})", self);
+        // debug!(target: "own_tx", "Transaction pool looks like {:?})", self);
         self.insert(*tx.hash(), Status::Culled(tx.clone()));
     }
 }

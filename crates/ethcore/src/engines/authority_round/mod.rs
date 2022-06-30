@@ -83,6 +83,7 @@ use types::{
     transaction::SignedTransaction,
     BlockNumber,
 };
+use hyperproofs::AggProof;
 use unexpected::{Mismatch, OutOfBounds};
 
 //mod block_gas_limit as crate_block_gas_limit;
@@ -1456,6 +1457,7 @@ impl IoHandler<()> for TransitionHandler {
     }
 
     fn timeout(&self, io: &IoContext<()>, timer: TimerToken) {
+        trace!(target:"auhtority round", "entering timeout");
         if timer == ENGINE_TIMEOUT_TOKEN {
             // NOTE we might be lagging by couple of steps in case the timeout
             // has not been called fast enough.
@@ -1469,6 +1471,14 @@ impl IoHandler<()> for TransitionHandler {
                     }
                 }
             }
+            let step = self.step.inner.load();
+            //Shard To-do need to modify it to the beginning of each round
+            // if step.rem_euclid(AggProof::shard_count()) ==0 {
+            //     if step != AggProof::get_last_commit_round(){
+            //         AggProof::commit(AggProof::get_shard(),0u64);
+            //         AggProof::set_last_commit_shard(step);
+            //     }
+            // }
 
             let next_run_at = Duration::from_millis(
                 AsMillis::as_millis(&self.step.inner.duration_remaining()) >> 2,
@@ -1497,6 +1507,7 @@ impl Engine<EthereumMachine> for AuthorityRound {
     }
 
     fn step(&self) {
+        trace!(target:"auhtority round", "entering step function");
         self.step.inner.increment();
         self.step.can_propose.store(true, AtomicOrdering::SeqCst);
         if let Ok(c) = self.upgrade_client_or(None) {
@@ -1655,12 +1666,21 @@ impl Engine<EthereumMachine> for AuthorityRound {
         };
 
         let step = self.step.inner.load();
-
+        //Shard To-do need to modify it to the beginning of each round
+        // if step.rem_euclid(AggProof::shard_count()) ==0 {
+        //     if step != AggProof::get_last_commit_round(){
+        //         AggProof::commit(AggProof::get_shard(),0u64);
+        //         AggProof::set_last_commit_shard(step);
+        //     }
+        // }
         if !is_step_proposer(&*validators, &parent.hash(), step, &our_addr) {
             trace!(target: "engine", "Not preparing block: not a proposer for step {}. (Our address: {})",
                step, our_addr);
             return SealingState::NotReady;
         }
+        trace!(target: "engine", "Preparing block: we are the proposer for step {}. (Our address: {})",
+               step, our_addr);
+
 
         SealingState::Ready
     }
@@ -1944,6 +1964,15 @@ impl Engine<EthereumMachine> for AuthorityRound {
         let mut transactions = self.run_randomness_phase(block)?;
         let nonce = transactions.last().map(|tx| tx.tx().nonce + U256::one());
         transactions.extend(self.run_posdao(block, nonce)?);
+        debug!(target:"authority round", "engine transactions look like {:?}",transactions);
+        // #[cfg(feature = "shard")]
+        let client = self.upgrade_client_or("Unable to prepare block")?;
+        let full_client = client.as_full_client().ok_or_else(|| {
+            EngineError::FailedSystemCall("Failed to upgrade to BlockchainClient.".to_string())
+        })?;
+        let tx_request = TransactionRequest::call(Address::zero(), Bytes::new())
+            .gas_price(U256::zero());
+        transactions.extend(full_client.create_shard_transaction(tx_request));
         Ok(transactions)
     }
 

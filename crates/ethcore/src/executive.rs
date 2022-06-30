@@ -1227,9 +1227,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
         // #[cfg(feature = "shard")]
         let balance = match t.as_unsigned() {
-            TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.balance {
-             Some(val) => val,
-                None => self.state.balance(&sender)?,
+            TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.shard_data_list.len() {
+             1 => shard_tx.shard_data_list[0].1,
+                _ => self.state.balance(&sender)?,
             },
             _ => self.state.balance(&sender)?,
         };
