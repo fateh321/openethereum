@@ -118,6 +118,9 @@ pub enum TypedReceipt {
 }
 
 impl TypedReceipt {
+    pub fn default() -> Self {
+        Self::Legacy(LegacyReceipt::new(TransactionOutcome::Unknown, U256::zero(), Vec::new()))
+    }
     /// Create a new receipt.
     pub fn new(type_id: TypedTxId, legacy_receipt: LegacyReceipt) -> Self {
         //curently we are using same receipt for both legacy and typed transaction
@@ -134,8 +137,8 @@ impl TypedReceipt {
     pub fn tx_type(&self) -> TypedTxId {
         match self {
             // #[cfg(feature = "shard")]
-            Self::Legacy(_) => TypedTxId::ShardTransaction,
-            // Self::Legacy(_) => TypedTxId::Legacy,
+            // Self::Legacy(_) => TypedTxId::ShardTransaction,
+            Self::Legacy(_) => TypedTxId::Legacy,
             Self::AccessList(_) => TypedTxId::AccessList,
             Self::EIP1559Transaction(_) => TypedTxId::EIP1559Transaction,
             // #[cfg(feature = "shard")]
@@ -176,6 +179,7 @@ impl TypedReceipt {
         match id.unwrap() {
             // #[cfg(feature = "shard")]
             TypedTxId::ShardTransaction => {
+                println!("////////Trying to decode shard receipt/////////");
                 let rlp = Rlp::new(&tx[1..]);
                 Ok(Self::Legacy(LegacyReceipt::decode(&rlp)?))
             }

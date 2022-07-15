@@ -141,12 +141,15 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
                 }
                 let key = BigEndianHash::from_uint(stack.peek(0));
                 let newval = stack.peek(1);
-                let val = ext.storage_at(&key)?.into_uint();
+                // #[cfg(feature = "shard")]
+                let val = U256::zero();
+                //let val = ext.storage_at(&key)?.into_uint();
 
                 let is_cold = !ext.al_contains_storage_key(current_address, &key);
 
                 let gas = if schedule.eip1283 {
-                    let orig = ext.initial_storage_at(&key)?.into_uint();
+                    //let orig = ext.initial_storage_at(&key)?.into_uint();
+                    let orig = U256::zero();
                     calculate_eip1283_eip2929_sstore_gas(schedule, is_cold, &orig, &val, &newval)
                 } else {
                     if val.is_zero() && !newval.is_zero() {

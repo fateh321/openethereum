@@ -26,6 +26,7 @@ extern crate parity_bytes as bytes;
 extern crate parity_util_mem;
 extern crate parking_lot;
 extern crate vm;
+extern crate hyperproofs;
 
 #[macro_use]
 extern crate lazy_static;

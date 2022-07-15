@@ -33,7 +33,7 @@ use vm::{
     self, ActionParams, ActionValue, CallType, ContractCreateResult, CreateContractAddress,
     GasLeft, MessageCallResult, ParamsType, ReturnData, Schedule, TrapError, TrapKind,
 };
-
+use hyperproofs::AggProof;
 use evm::CostType;
 use instructions::{self, Instruction, InstructionInfo};
 
@@ -708,7 +708,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
                 // clear return data buffer before creating new call frame.
                 self.return_data = ReturnData::empty();
-
+                // no shard here coz create happens in all shards
                 let can_create = ext.balance(&self.params.address)? >= endowment
                     && ext.depth() < ext.schedule().max_depth;
                 if !can_create {
@@ -1007,34 +1007,157 @@ impl<Cost: CostType> Interpreter<Cost> {
                 self.stack.push(k.into_uint());
             }
             instructions::SLOAD => {
-                let key = BigEndianHash::from_uint(&self.stack.pop_back());
-                let word = ext.storage_at(&key)?.into_uint();
-                self.stack.push(word);
+                if ext.is_create_txn() {
+                    let key = BigEndianHash::from_uint(&self.stack.pop_back());
+                    let key_shard = AggProof::concat_hash(ext.origin_address(), key);
+                    let word = ext.storage_at(&key)?.into_uint();
+                    println!("SLOAD fetching storage at {}", key);
+                    self.stack.push(word);
 
-                ext.al_insert_storage_key(self.params.address, key);
+                    ext.al_insert_storage_key(self.params.address, key);
+                } else {
+                    let key = BigEndianHash::from_uint(&self.stack.pop_back());
+                    // #[cfg(feature = "shard")]
+                    let key_shard = AggProof::concat_hash(ext.origin_address(), key);
+                    let val = ext.hash_map_storage_at(&key_shard);
+                    let word = if val.1 {
+                        val.0
+                    } else {
+                        if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+                            let word_temp = ext.storage_at(&key)?.into_uint();
+                            let mut begin_round_word = ext.hash_map_beginning_storage_at(&key_shard);
+                            if begin_round_word.1 {
+                                ext.hash_map_txn_insert(key_shard, begin_round_word.0);
+                            } else {
+                                ext.hash_map_txn_insert(key_shard, word_temp);
+                            }
+                            //in any case, push the address in the state address vec
+                            ext.push_address_txn_vec(key_shard);
+                            word_temp
+                        } else {
+                            ext.set_txn_incomplete();
+                            ext.set_next_shard(ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                            return Ok(InstructionResult::StopExecution);
+                        }
+                    };
+                    // let word = ext.storage_at(&key)?.into_uint();
+                    println!("SLOAD fetching storage at {}", key);
+                    self.stack.push(word);
+
+                    ext.al_insert_storage_key(self.params.address, key);
+                }
             }
             instructions::SSTORE => {
-                let key = BigEndianHash::from_uint(&self.stack.pop_back());
-                let val = self.stack.pop_back();
-
-                let current_val = ext.storage_at(&key)?.into_uint();
-                // Increase refund for clear
-                if ext.schedule().eip1283 {
-                    let original_val = ext.initial_storage_at(&key)?.into_uint();
-                    gasometer::handle_eip1283_sstore_clears_refund(
-                        ext,
-                        &original_val,
-                        &current_val,
-                        &val,
-                    );
-                } else {
-                    if !current_val.is_zero() && val.is_zero() {
-                        let sstore_clears_schedule = ext.schedule().sstore_refund_gas;
-                        ext.add_sstore_refund(sstore_clears_schedule);
+                if ext.is_create_txn(){
+                    let key = BigEndianHash::from_uint(&self.stack.pop_back());
+                    let val = self.stack.pop_back();
+                    // #[cfg(feature = "shard")]
+                    let key_shard = AggProof::concat_hash(ext.origin_address(), key);
+                    //word is the current val
+                    let word = ext.storage_at(&key)?.into_uint();
+                    let mut delta = val.checked_sub(word);
+                    let delta_string:String;
+                    if delta == None {
+                        delta = word.checked_sub(val);
+                        let mut neg = String::from("-");
+                        let v = delta.unwrap().to_string();
+                        neg.push_str(&v);
+                        delta_string = neg.clone();
+                    }else {
+                        delta_string = delta.unwrap().to_string();
                     }
+                    ext.set_storage(key, BigEndianHash::from_uint(&val))?;
+                    println!("SSTORE setting storage at {} with val {}", key, val);
+                    AggProof::pushAddressDelta(key_shard.to_low_u64_be().rem_euclid(2u64.pow(16)), delta_string.clone(), ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                    println!("delta {} from address {} in shard {}", delta_string, key_shard , ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                }else {
+                    let key = BigEndianHash::from_uint(&self.stack.pop_back());
+                    let val = self.stack.pop_back();
+                    // #[cfg(feature = "shard")]
+                    let key_shard = AggProof::concat_hash(ext.origin_address(), key);
+
+                    // ext.hash_map_insert(key_shard, val.clone());
+
+                    // #[cfg(feature = "shard")]
+                    //we are ignoring this eip
+                    // let current_val = ext.storage_at(&key)?.into_uint();
+                    // // Increase refund for clear
+                    // if ext.schedule().eip1283 {
+                    //     let original_val = ext.initial_storage_at(&key)?.into_uint();
+                    //     gasometer::handle_eip1283_sstore_clears_refund(
+                    //         ext,
+                    //         &original_val,
+                    //         &current_val,
+                    //         &val,
+                    //     );
+                    // } else {
+                    //     if !current_val.is_zero() && val.is_zero() {
+                    //         let sstore_clears_schedule = ext.schedule().sstore_refund_gas;
+                    //         ext.add_sstore_refund(sstore_clears_schedule);
+                    //     }
+                    // }
+                    match ext.txn_complete_status(){
+                        Some(T) => if T {
+                            //next, retrieve current val
+                            let current_val = ext.hash_map_storage_at(&key_shard);
+                            let word = if current_val.1{
+                                current_val.0
+                            } else {
+                                if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard(){
+                                    let word_temp = ext.storage_at(&key)?.into_uint();
+                                    let mut begin_round_word = ext.hash_map_beginning_storage_at(&key_shard);
+                                    if begin_round_word.1{
+                                        ext.hash_map_txn_insert(key_shard, begin_round_word.0);
+                                    }else{
+                                        ext.hash_map_txn_insert(key_shard, word_temp);
+                                    }
+                                    //in any case, push the address in the state address vec
+                                    ext.push_address_txn_vec(key_shard);
+                                    word_temp
+                                } else{
+                                    ext.set_txn_incomplete();
+                                    ext.set_next_shard(ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                                    return Ok(InstructionResult::StopExecution);
+
+                                }
+
+                            };
+                            let mut delta = val.checked_sub(word);
+                            let delta_string:String;
+                            if delta == None{
+                                delta = word.checked_sub(val);
+                                let mut neg = String::from("-");
+                                let v = delta.unwrap().to_string();
+                                neg.push_str(&v);
+                                delta_string = neg.clone();
+                            }else {
+                                delta_string = delta.unwrap().to_string();
+                            }
+                            // uptil this part, we caculate delta. Only when it is a complete transaction.
+
+                            //***************************************************
+                            ext.hash_map_cache_insert(key_shard, val.clone());
+                            ext.hash_map_global_insert(key_shard, val.clone());
+                            if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+                                if !ext.hash_map_beginning_storage_at(&key_shard).1{
+                                    // let current_val = ext.storage_at(&key)?.into_uint();
+                                    // ext.hash_map_beginning_insert(key_shard, current_val.clone());
+                                    // use the previous fetched value
+                                    ext.hash_map_beginning_insert(key_shard, word.clone());
+                                }
+                                ext.set_storage(key, BigEndianHash::from_uint(&val))?;
+                                println!("SSTORE setting storage at {} with val {}", key, val);
+                            }
+                            AggProof::pushAddressDelta(key_shard.to_low_u64_be().rem_euclid(2u64.pow(16)), delta_string.clone(), ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                            println!("delta {} from address {} in shard {}", delta_string, key_shard , ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                        } else {
+                            ext.hash_map_cache_insert(key_shard, val.clone());
+                        }
+                        None => {ext.hash_map_cache_insert(key_shard, val.clone());}
+                    }
+                    ext.al_insert_storage_key(self.params.address, key);
                 }
-                ext.set_storage(key, BigEndianHash::from_uint(&val))?;
-                ext.al_insert_storage_key(self.params.address, key);
+
             }
             instructions::PC => {
                 self.stack.push(U256::from(self.reader.position - 1));
@@ -1051,7 +1174,29 @@ impl<Cost: CostType> Interpreter<Cost> {
             }
             instructions::BALANCE => {
                 let address = u256_to_address(&self.stack.pop_back());
-                let balance = ext.balance(&address)?;
+                // #[cfg(feature = "shard")]
+                let val = ext.hash_map_storage_at(&address);
+                let balance = if val.1{
+                    val.0
+                } else {
+                    if address.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard(){
+                        let balance_temp = ext.balance(&address)?;
+                        let mut begin_round_word = ext.hash_map_beginning_storage_at(&address);
+                        if begin_round_word.1{
+                            ext.hash_map_txn_insert(address, begin_round_word.0);
+                        }else{
+                            ext.hash_map_txn_insert(address, balance_temp);
+                        }
+                        balance_temp
+                    } else{
+                        ext.set_txn_incomplete();
+                        ext.set_next_shard(address.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                        return Ok(InstructionResult::StopExecution);
+
+                    }
+
+                };
+                // let balance = ext.balance(&address)?;
                 self.stack.push(balance);
                 ext.al_insert_address(address);
             }
@@ -1163,7 +1308,30 @@ impl<Cost: CostType> Interpreter<Cost> {
             }
             instructions::CHAINID => self.stack.push(ext.chain_id().into()),
             instructions::SELFBALANCE => {
-                self.stack.push(ext.balance(&self.params.address)?);
+                // #[cfg(feature = "shard")]
+                let val = ext.hash_map_storage_at(&self.params.address);
+                let balance = if val.1{
+                    val.0
+                } else {
+                    if self.params.address.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard(){
+                        let balance_temp = ext.balance(&self.params.address)?;
+                        let mut begin_round_word = ext.hash_map_beginning_storage_at(&self.params.address);
+                        if begin_round_word.1{
+                            ext.hash_map_txn_insert(self.params.address, begin_round_word.0);
+                        }else{
+                            ext.hash_map_txn_insert(self.params.address, balance_temp);
+                        }
+                        balance_temp
+                    } else{
+                        ext.set_txn_incomplete();
+                        ext.set_next_shard(self.params.address.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                        return Ok(InstructionResult::StopExecution);
+
+                    }
+
+                };
+                self.stack.push(balance);
+                // self.stack.push(ext.balance(&self.params.address)?);
             }
             instructions::BASEFEE => {
                 self.stack.push(ext.env_info().base_fee.unwrap_or_default());

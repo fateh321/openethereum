@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with OpenEthereum.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use accounts::AccountProvider;
@@ -104,7 +105,10 @@ impl super::Accounts for Signer {
             Some(TypedTxId::ShardTransaction) => TypedTransaction::ShardTransaction(ShardTransactionTx {
                 transaction: legacy_tx,
                 shard: 999u64,
-                shard_data_list: Vec::new(),
+                next_shard:999u64,
+                incomplete: 0u64,
+                original_sender: Address::zero(),
+                shard_data_list: HashMap::new(),
                 shard_proof_list: Vec::new(),
                 shard_proof: String::new(),
             }),
@@ -115,8 +119,10 @@ impl super::Accounts for Signer {
         let signature = signature(&*self.accounts, filled.from, hash, password)?;
 
         Ok(signature.map(|sig| {
-            SignedTransaction::new(t.with_signature(sig, chain_id))
-				.expect("Transaction was signed by AccountsProvider; it never produces invalid signatures; qed")
+            let mut sig_txn = SignedTransaction::new(t.with_signature(sig, chain_id))
+				.expect("Transaction was signed by AccountsProvider; it never produces invalid signatures; qed");
+            sig_txn.change_original_sender(sig_txn.sender());
+            sig_txn
         }))
     }
 

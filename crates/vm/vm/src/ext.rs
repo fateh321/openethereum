@@ -16,6 +16,7 @@
 
 //! Interface for Evm externalities.
 
+use std::ops::Add;
 use bytes::Bytes;
 use call_type::CallType;
 use env_info::EnvInfo;
@@ -202,4 +203,29 @@ pub trait Ext {
 
     /// Inserts an address into the list
     fn al_insert_address(&mut self, address: Address);
+    // #[cfg(feature = "shard")]
+    /// returns address of the code
+    fn origin_address(&self) -> Address;
+    ///retrives hashmap for storage
+    fn hash_map_storage_at(&self, key: &Address) ->(U256, bool);
+    /// looks for already present value at the beginning of the round;
+    fn hash_map_beginning_storage_at(&self, key: &Address) ->(U256, bool);
+    /// insert key, val in beginning round hashmap
+    fn hash_map_beginning_insert(&self, key: Address, val: U256);
+    /// insert key, val in the hashmap cache
+    fn hash_map_cache_insert(&self, key: Address, val: U256);
+    /// inserts key,val in the hashmap
+    fn hash_map_txn_insert(&self, key: Address, val: U256);
+    /// insert key,val in hashmap global insert
+    fn hash_map_global_insert(&self, key: Address, val: U256);
+    ///set a transaction incomplete;
+    fn set_txn_incomplete(&mut self);
+    /// set next shard for an incomplete transaction
+    fn set_next_shard(&mut self, shard: u64);
+    /// returns complete status from status
+    fn txn_complete_status(&mut self) -> Option<bool>;
+    ///pushes in the address vec
+    fn push_address_txn_vec(&mut self, a: Address);
+    ///tells whether it is a create transaction
+    fn is_create_txn(&self)->bool;
 }

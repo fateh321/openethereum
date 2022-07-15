@@ -26,6 +26,7 @@ use std::{
     fmt,
     sync::Arc,
 };
+use std::cell::Ref;
 
 use error::Error;
 use executed::{Executed, ExecutionError};
@@ -315,6 +316,22 @@ pub struct State<B> {
     checkpoints: RefCell<Vec<HashMap<Address, Option<AccountEntry>>>>,
     account_start_nonce: U256,
     factories: Factories,
+    // #[cfg(feature = "shard")]
+    // stores latest data modified for the last 10 rounds. 11th hashmap is popped every round and new hashmap is pushed on top.
+    data_hash_map_global: RefCell<Vec<HashMap<Address, U256>>>,
+    // this keeps track of the data at the beginning of each round. Key, val is pushed whenever SStore occurs and no key exists in hashmap
+    data_hash_map_round_beginning: RefCell<HashMap<Address,U256>>,
+    //  this is the cache related to execution (whenever SSTORE occurs for incomplete transaction).
+    hash_map_cache: RefCell<HashMap<Address,U256>>,
+    //the exact hash_map of a transaction.
+    data_hash_map_txn: RefCell<HashMap<Address,U256>>,
+    // All the incomplete txn with next_shard equal to my shard gets collected here.
+    incomplete_txn_vec: RefCell<Vec<SignedTransaction>>,
+    address_txn_vec: RefCell<Vec<Address>>,
+    next_shard: RefCell<u64>,
+    complete: RefCell<Option<bool>>,
+    mined: RefCell<Option<bool>>,
+    is_create_txn: RefCell<bool>,
 }
 
 #[derive(Copy, Clone)]
@@ -385,6 +402,16 @@ impl<B: Backend> State<B> {
             checkpoints: RefCell::new(Vec::new()),
             account_start_nonce: account_start_nonce,
             factories: factories,
+            data_hash_map_global: RefCell::new(Vec::new()),
+            data_hash_map_round_beginning:RefCell::new(HashMap::new()),
+            hash_map_cache: RefCell::new(HashMap::new()),
+            data_hash_map_txn: RefCell::new(HashMap::new()),
+            incomplete_txn_vec: RefCell::new(Vec::new()),
+            address_txn_vec: RefCell::new(Vec::new()),
+            next_shard: RefCell::new(999u64),
+            complete: RefCell::new(None::<bool>),
+            mined: RefCell::new(None::<bool>),
+            is_create_txn: RefCell::new(false),
         }
     }
 
@@ -406,11 +433,143 @@ impl<B: Backend> State<B> {
             checkpoints: RefCell::new(Vec::new()),
             account_start_nonce: account_start_nonce,
             factories: factories,
+            data_hash_map_global: RefCell::new(Vec::new()),
+            data_hash_map_round_beginning:RefCell::new(HashMap::new()),
+            hash_map_cache: RefCell::new(HashMap::new()),
+            data_hash_map_txn: RefCell::new(HashMap::new()),
+            incomplete_txn_vec: RefCell::new(Vec::new()),
+            address_txn_vec: RefCell::new(Vec::new()),
+            next_shard: RefCell::new(999u64),
+            complete: RefCell::new(None::<bool>),
+            mined: RefCell::new(None::<bool>),
+            is_create_txn: RefCell::new(false),
         };
 
         Ok(state)
     }
+    // #[cfg(feature = "shard")]
+    pub fn default_apply_result(&self)-> ApplyResult<FlatTrace, VMTrace>{
+        let receipt = TypedReceipt::default();
+        let bytes : Vec<u8> = Vec::new();
+        let trace : Vec<FlatTrace> = Vec::new();
+        let vm_trace: Option<VMTrace> = None;
+        Ok(ApplyOutcome {
+            receipt: receipt,
+            output: bytes,
+            trace: trace,
+            vm_trace: vm_trace,
+        })
+    }
+    pub fn set_is_create_txn(&mut self, b: bool) {
+        self.is_create_txn = RefCell::new(b);
+    }
+    pub fn is_create_txn(&self)->bool{
+        self.is_create_txn.borrow().clone()
+    }
+    pub fn clear_hash_map_cache(&mut self) {self.hash_map_cache.get_mut().clear();}
+    pub fn clear_address_txn_vec(&mut self){
+        self.address_txn_vec.get_mut().clear();
+    }
+    pub fn push_address_txn_vec(&mut self, a:Address){
+        self.address_txn_vec.borrow_mut().push(a);
+    }
+    pub fn get_address_txn_vec(&self)-> Vec<Address>{
+        self.address_txn_vec.borrow().clone()
+    }
+    pub fn push_incomplete_txn(&mut self, t: SignedTransaction){
+        self.incomplete_txn_vec.borrow_mut().push(t);
+    }
+    pub fn set_incomplete_txn(&mut self, t: Vec<SignedTransaction>){
+        self.incomplete_txn_vec = RefCell::new(t);
+    }
+    pub fn set_hash_map_global(&mut self, h: Vec<HashMap<Address, U256>>){
+        self.data_hash_map_global = RefCell::new(h);
+    }
+    pub fn set_hash_map_round_beginning(&mut self, h: HashMap<Address, U256>){
+        self.data_hash_map_round_beginning = RefCell::new(h);
+    }
+    pub fn hash_map_cache_storage_at(& self, key:&Address) -> (U256, bool) {
+        match self.hash_map_cache.borrow().get(key){
+            Some(val) => (val.clone(), true),
+            None => (U256::zero(), false),
+        }
+    }
+    pub fn data_hash_map_txn_storage_at(& self, key:&Address) -> (U256, bool) {
+        match self.data_hash_map_txn.borrow().get(key){
+            Some(val) => (val.clone(), true),
+            None => (U256::zero(), false),
+        }
+    }
+    pub fn data_hashmap_txn(& self)->HashMap<Address, U256>{
+        self.data_hash_map_txn.borrow().clone()
+    }
+    pub fn export_data_hashmap_global(&self)->Vec<HashMap<Address, U256>>{
+        self.data_hash_map_global.borrow().clone()
+    }
+    pub fn export_data_hashmap_round_beginning(&self)->HashMap<Address, U256>{
+        self.data_hash_map_round_beginning.borrow().clone()
+    }
+    pub fn export_incomplete_txn(&self)->Vec<SignedTransaction>{
+        self.incomplete_txn_vec.borrow().clone()
+    }
+    pub fn clear_data_hashmap_txn(&mut self){
+        self.data_hash_map_txn.get_mut().clear();
+    }
 
+    pub fn global_hash_map_storage_at(&self, key:&Address) -> (U256, bool) {
+        let len = self.data_hash_map_global.borrow().len();
+        let mut val = (U256::zero(), false);
+        for i in (0..len).rev(){
+            match self.data_hash_map_global.borrow()[i].get(key){
+                Some(v) => {val = (v.clone(), true);
+                break;},
+                None => { },
+            }
+        }
+    val
+    }
+    pub fn hash_map_beginning_storage_at(&self, key:&Address) -> (U256, bool) {
+        match self.data_hash_map_round_beginning.borrow().get(key){
+            Some(val) => (val.clone(), true),
+            None => (U256::zero(), false),
+        }
+    }
+    pub fn hash_map_cache_insert(&self, key: Address, val: U256){
+        self.hash_map_cache.borrow_mut().insert(key,val);
+    }
+    pub fn hash_map_beginning_insert(&self, key: Address, val: U256) {
+        self.data_hash_map_round_beginning.borrow_mut().insert(key,val);
+    }
+    pub fn hash_map_txn_insert(&self, key: Address, val: U256){
+        self.data_hash_map_txn.borrow_mut().insert(key, val);
+    }
+    pub fn global_hash_map_insert(&self, key: Address, val: U256){
+        let len = self.data_hash_map_global.borrow().len();
+        assert!(len > 0);
+        self.data_hash_map_global.borrow_mut()[len-1].insert(key, val);
+    }
+
+
+    pub fn set_txn_status(&mut self, status: Option<bool>){
+        self.complete = RefCell::new(status);
+    }
+    pub fn set_mined_status(&mut self, status: Option<bool>){
+        self.mined = RefCell::new(status);
+    }
+    pub fn set_next_shard(&mut self, shard:u64){
+        self.next_shard = RefCell::new(shard);
+    }
+    pub fn get_next_shard(&self)-> u64{
+        self.next_shard.borrow().clone()
+    }
+    pub fn get_mined_status(&self)-> Option<bool>{
+        self.mined.borrow().clone()
+    }
+    pub fn txn_complete_status(&mut self) -> Option<bool>{
+        // let status = self.complete.get_mut();
+        // status.clone()
+        self.complete.borrow().clone()
+    }
     /// Get a VM factory that can execute on this state.
     pub fn vm_factory(&self) -> VmFactory {
         self.factories.vm.clone()
@@ -1573,6 +1732,30 @@ impl Clone for State<StateDB> {
             cache
         };
 
+        let data_hash_map_global = self.data_hash_map_global.borrow().clone();
+        let data_hash_map_round_beginning = self.data_hash_map_round_beginning.borrow().clone();
+        let hash_map_cache = self.hash_map_cache.borrow().clone();
+        let data_hash_map_txn = self.data_hash_map_txn.borrow().clone();
+        let incomplete_txn_vec = self.incomplete_txn_vec.borrow().clone();
+        let address_txn_vec = self.address_txn_vec.borrow().clone();
+        // let data_hash_map_global = {
+        //     let mut data_hash_map_global: Vec<HashMap<Address, U256>> = Vec::new();
+        //     for hashmap in self.data_hash_map_global.borrow().iter(){
+        //
+        //     }
+        //     for (key, val) in self.data_hash_map.borrow().iter() {
+        //             data_hash_map.insert(key.clone(), val.clone());
+        //     }
+        //     data_hash_map
+        // };
+        // let data_hash_map_gen = {
+        //     let mut data_hash_map_gen: HashMap<Address, U256> = HashMap::new();
+        //     for (key, val) in self.data_hash_map_gen.borrow().iter() {
+        //         data_hash_map_gen.insert(key.clone(), val.clone());
+        //     }
+        //     data_hash_map_gen
+        // };
+
         State {
             db: self.db.boxed_clone(),
             root: self.root.clone(),
@@ -1580,6 +1763,16 @@ impl Clone for State<StateDB> {
             checkpoints: RefCell::new(Vec::new()),
             account_start_nonce: self.account_start_nonce.clone(),
             factories: self.factories.clone(),
+            data_hash_map_global: RefCell::new(data_hash_map_global),
+            data_hash_map_round_beginning:RefCell::new(data_hash_map_round_beginning),
+            hash_map_cache: RefCell::new(hash_map_cache),
+            data_hash_map_txn: RefCell::new(data_hash_map_txn),
+            incomplete_txn_vec: RefCell::new(incomplete_txn_vec),
+            address_txn_vec: RefCell::new(address_txn_vec),
+            next_shard: self.next_shard.clone(),
+            complete: self.complete.clone(),
+            mined: self.mined.clone(),
+            is_create_txn: self.is_create_txn.clone(),
         }
     }
 }

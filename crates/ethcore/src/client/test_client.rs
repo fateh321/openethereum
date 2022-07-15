@@ -470,6 +470,23 @@ impl PrepareOpenBlock for TestBlockChainClient {
         open_block.set_timestamp(*self.latest_block_timestamp.read());
         Ok(open_block)
     }
+    fn import_hash_map_in_chain(&self, hash_map_global: Vec<HashMap<Address, U256>>, hash_map_round_beginning: HashMap<Address, U256>) {
+    }
+    fn export_incomplete_txn(&self) -> Vec<SignedTransaction> {
+        Vec::new()
+    }
+    fn clear_incomplete_txn(&self) {
+
+    }
+    fn clear_data_hash_map_global(&self) {
+
+    }
+    fn clear_data_hash_map_round_beginning(&self) {
+
+    }
+    fn resize_hash_map_global(&self) {
+
+    }
 }
 
 impl ScheduleInfo for TestBlockChainClient {

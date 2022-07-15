@@ -17,6 +17,7 @@
 //! Traits implemented by client.
 
 use std::{collections::BTreeMap, sync::Arc};
+use std::collections::HashMap;
 
 use blockchain::{BlockReceipts, TreeRoute};
 use bytes::Bytes;
@@ -565,6 +566,16 @@ pub trait PrepareOpenBlock {
         gas_range_target: (U256, U256),
         extra_data: Bytes,
     ) -> Result<OpenBlock, Error>;
+    fn import_hash_map_in_chain(
+        &self,
+        hash_map_global: Vec<HashMap<Address,U256>>,
+        hash_map_round_beginning: HashMap<Address,U256>,
+    ) ;
+    fn export_incomplete_txn(&self) -> Vec<SignedTransaction>;
+    fn clear_incomplete_txn(&self) ;
+    fn clear_data_hash_map_global(&self);
+    fn clear_data_hash_map_round_beginning(&self);
+    fn resize_hash_map_global(&self);
 }
 
 /// Provides methods used for sealing new state

@@ -470,6 +470,21 @@ impl Miner {
     {
         trace_time!("prepare_block");
         let chain_info = chain.chain_info();
+        // #[cfg(feature = "shard")]
+        //committing data to hyperproofs
+        let block_num = chain_info.best_block_number+1;
+        if block_num.clone().rem_euclid(AggProof::shard_count()) ==0 {
+            trace!(target:"miner", "block number is {}", block_num.clone());
+            if block_num.clone() != AggProof::get_last_commit_round(){
+                //clear data_hash_map_round_beginning
+                debug!(target: "miner", "before clearing data hashmap");
+                chain.clear_data_hash_map_round_beginning();
+                chain.resize_hash_map_global();
+                debug!(target: "miner", "after clearing data hashmap");
+                AggProof::commit(AggProof::get_shard(),0u64);
+                AggProof::set_last_commit_shard(block_num.clone());
+            }
+        }
 
         // Some engines add transactions to the block for their own purposes, e.g. AuthorityRound RANDAO.
         let (mut open_block, original_work_hash, engine_txs) = {
@@ -497,7 +512,7 @@ impl Miner {
                     trace!(target: "miner", "prepare_block: No existing work - making new block");
                     let params = self.params.read().clone();
 
-                    let block = match chain.prepare_open_block(
+                    let mut block = match chain.prepare_open_block(
                         params.author,
                         params.gas_range_target,
                         params.extra_data,
@@ -509,6 +524,9 @@ impl Miner {
                             return None;
                         }
                     };
+                    debug!(target: "miner", "before exporting incomplete txn");
+                    block.set_incomplete_txn(chain.export_incomplete_txn());
+                    chain.clear_incomplete_txn();
                     // Before adding from the queue to the new block, give the engine a chance to add transactions.
                     match self.engine.generate_engine_transactions(&block) {
                         Ok(transactions) => (block, last_work_hash, transactions),
@@ -571,14 +589,9 @@ impl Miner {
                 enforce_priority_fees: true,
             },
         );
-        // #[cfg(feature = "shard")]
-        if block_number.clone().rem_euclid(AggProof::shard_count()) ==0 {
-            trace!(target:"miner", "block number is {}", block_number.clone());
-            if block_number.clone() != AggProof::get_last_commit_round(){
-                AggProof::commit(AggProof::get_shard(),0u64);
-                AggProof::set_last_commit_shard(block_number.clone());
-            }
-        }
+
+        //set mined status to true in the state
+        open_block.set_mined_status(Some(true));
         let took_ms = |elapsed: &Duration| {
             elapsed.as_secs() * 1000 + elapsed.subsec_nanos() as u64 / 1_000_000
         };
@@ -586,21 +599,27 @@ impl Miner {
         let block_start = Instant::now();
         debug!(target: "miner", "Attempting to push {} transactions.", engine_txs.len() + queue_txs.len());
         // #[cfg(feature = "shard")]
+        debug!(target: "miner", "before waiting for proof");
         let (is_proof, proof) = if !self.proof_data.read().is_empty() {match self.channel_receiver.lock().recv() {
             Ok(T) => (true,T),
         _ => (false, String::new()),
         }
         }else {(false, String::new()) };
+        debug!(target: "miner", "after waiting for proofs");
         for transaction in engine_txs
-            .into_iter().map(|tx| if is_proof{
-            let pd = self.proof_data.read().clone();
-            //clear proof data from previous round
-            self.proof_data.write().clear();
-            AggProof::resetAddressCommit(block_shard);
+            .into_iter().map(|tx| if tx.call_address()==Some(Address::zero()) {
+            if is_proof{
+                let pd = self.proof_data.read().clone();
+                //clear proof data from previous round
+                self.proof_data.write().clear();
+                AggProof::resetAddressCommit(block_shard);
 
-            println!("author shard is {}", block_shard);
-            tx.with_proof(pd,proof.clone()).with_shard(block_shard)
-        }else { tx.with_shard(block_shard) })
+                println!("author shard is {}", block_shard);
+                tx.with_proof(pd,proof.clone()).with_shard(block_shard)
+            }else { tx.with_shard(block_shard) }
+        }else {
+            tx
+        })
             .chain(queue_txs.into_iter().map(|tx| tx.signed().clone()))
         {
             let start = Instant::now();
@@ -610,7 +629,8 @@ impl Miner {
             let hash = transaction.hash();
             // debug!(target: "miner", "hash before {:?} and hash after {:?}", hash_before, hash);
             // debug!(target: "miner", "transaction looks like {:?}", transaction);
-            let sender = transaction.sender();
+            //below should be original sender;
+            let sender = transaction.original_sender();
             let balance = open_block.state.balance(&sender).unwrap();
             let shard_data = (sender.clone(),balance.clone());
             // #[cfg(feature = "shard")]
@@ -705,8 +725,14 @@ impl Miner {
                 // #[cfg(feature = "shard")]
                 // _ =>tx_count += 1,
                   _ => {tx_count += 1;
-                      self.proof_data.write().push(shard_data);
-                      AggProof::pushAddressCommit(shard_data.0.to_low_u64_be().rem_euclid(2u64.pow(16)),block_shard);},
+                      let _h = open_block.state.data_hashmap_txn();
+                      for _t in open_block.state.get_address_txn_vec(){
+                          self.proof_data.write().push((_t,_h.get(&_t).unwrap().clone()));
+                          AggProof::pushAddressCommit(_t.to_low_u64_be().rem_euclid(2u64.pow(16)),block_shard);
+                      }
+                      // self.proof_data.write().push(shard_data);
+                      // AggProof::pushAddressCommit(shard_data.0.to_low_u64_be().rem_euclid(2u64.pow(16)),block_shard);
+                      },
             }
         }
         AggProof::updateTree(block_shard);
@@ -739,7 +765,9 @@ impl Miner {
                 .remove(not_allowed_transactions.iter(), false);
             self.transaction_queue.penalize(senders_to_penalize.iter());
         }
-
+        debug!(target: "miner", "before importing hashmaps");
+        chain.import_hash_map_in_chain(block.state.export_data_hashmap_global(), block.state.export_data_hashmap_round_beginning());
+        debug!(target: "miner", "after importing hashmaps");
         Some((block, original_work_hash))
     }
 

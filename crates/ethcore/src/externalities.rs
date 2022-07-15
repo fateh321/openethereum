@@ -119,6 +119,55 @@ where
     V: VMTracer,
     B: StateBackend,
 {
+    // #[cfg(feature = "shard")]
+    fn push_address_txn_vec(&mut self, a: Address) {
+        self.state.push_address_txn_vec(a);
+    }
+    fn is_create_txn(&self)->bool{
+        self.state.is_create_txn()
+    }
+
+    fn origin_address(&self)-> Address {
+      self.origin_info.address.clone()
+    }
+    fn hash_map_storage_at(&self, key: &Address) ->(U256, bool){
+        //check in hashmap_cache first
+        let mut val = self.state.hash_map_cache_storage_at(key);
+        if !val.1{
+            val = self.state.data_hash_map_txn_storage_at(key);
+            if val.1{
+                let temp_val = self.state.global_hash_map_storage_at(key);
+                if temp_val.1{
+                    val = temp_val
+                }
+            }
+        }
+        val
+    }
+    fn hash_map_beginning_storage_at(&self, key: &Address) ->(U256, bool){
+        self.state.hash_map_beginning_storage_at(key)
+    }
+    fn hash_map_cache_insert(&self, key: Address, val: U256){
+        self.state.hash_map_cache_insert(key, val);
+    }
+    fn hash_map_beginning_insert(&self, key: Address, val: U256){
+        self.state.hash_map_beginning_insert(key, val);
+    }
+    fn hash_map_global_insert(&self, key: Address, val: U256){
+        self.state.global_hash_map_insert(key, val);
+    }
+    fn hash_map_txn_insert(&self, key: Address, val: U256){
+        self.state.hash_map_txn_insert(key, val);
+    }
+    fn set_txn_incomplete(&mut self){
+        self.state.set_txn_status(Some(false));
+    }
+    fn set_next_shard(&mut self, shard: u64){
+        self.state.set_next_shard(shard);
+    }
+    fn txn_complete_status(&mut self) -> Option<bool>{
+        self.state.txn_complete_status()
+    }
     fn initial_storage_at(&self, key: &H256) -> vm::Result<H256> {
         if self
             .state

@@ -1145,8 +1145,8 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             }
             TypedTransaction::Legacy(_) => (), //legacy transactions are allways valid
         };
-
-        let sender = t.sender();
+        // #[cfg(feature = "shard")]
+        let sender = t.original_sender();
         let nonce = self.state.nonce(&sender)?;
 
         let mut base_gas_required = U256::from(t.tx().gas_required(&schedule));
@@ -1227,9 +1227,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
         // #[cfg(feature = "shard")]
         let balance = match t.as_unsigned() {
-            TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.shard_data_list.len() {
-             1 => shard_tx.shard_data_list[0].1,
-                _ => self.state.balance(&sender)?,
+            TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.shard_data_list.get(&sender) {
+             Some(bal) => bal.clone(),
+                None => self.state.balance(&sender)?,
             },
             _ => self.state.balance(&sender)?,
         };
@@ -1545,8 +1545,8 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
         trace!("exec::finalize: t.gas={}, sstore_refunds={}, suicide_refunds={}, refunds_bound={}, gas_left_prerefund={}, refunded={}, gas_left={}, gas_used={}, refund_value={}, fees_value={}\n",
 			t.tx().gas, sstore_refunds, suicide_refunds, refunds_bound, gas_left_prerefund, refunded, gas_left, gas_used, refund_value, fees_value);
-
-        let sender = t.sender();
+        // #[cfg(feature = "shard")]
+        let sender = t.original_sender();
         trace!(
             "exec::finalize: Refunding refund_value={}, sender={}\n",
             refund_value,

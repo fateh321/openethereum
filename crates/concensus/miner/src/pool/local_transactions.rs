@@ -138,12 +138,13 @@ impl LocalTransactionsList {
             .collect();
 
         for hash in to_remove {
+            debug!(target: "Local_tx_pool", "Clearing txn (hash {:?}) ", hash);
             self.transactions.remove(&hash);
         }
     }
 
     fn insert(&mut self, hash: H256, status: Status) {
-        debug!(target: "Local_tx_pool", "Adding txn (hash {:?})", hash);
+        debug!(target: "Local_tx_pool", "Adding txn (hash {:?}) with status{:?}", hash, status);
         // debug!(target: "Local_tx_pool", "Transaction pool looks like {:?})", self);
         let result = self.transactions.insert(hash, status);
         if let Some(old) = result {

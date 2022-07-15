@@ -32,6 +32,7 @@
 //! related info.
 
 use std::{cmp, collections::HashSet, ops, sync::Arc};
+use std::collections::HashMap;
 
 use bytes::Bytes;
 use ethereum_types::{Address, Bloom, H256, U256};
@@ -180,6 +181,8 @@ impl<'x> OpenBlock<'x> {
         let number = parent.number() + 1;
 
         // t_nb 8.1.1 get parent StateDB.
+        //this part is different
+        // #[cfg(feature = "shard")]
         let state = State::from_existing(
             db,
             state_root.clone(),
@@ -280,6 +283,12 @@ impl<'x> OpenBlock<'x> {
         Ok(r)
     }
 
+    pub fn set_mined_status(&mut self, status: Option<bool>){
+        self.block.state.set_mined_status(status);
+    }
+    pub fn set_incomplete_txn(&mut self, txn: Vec<SignedTransaction>){
+        self.block.state.set_incomplete_txn(txn);
+    }
     /// Alter the timestamp of the block.
     pub fn set_timestamp(&mut self, timestamp: u64) {
         self.block.header.set_timestamp(timestamp);
@@ -341,22 +350,182 @@ impl<'x> OpenBlock<'x> {
         }
         let env_info = self.block.env_info();
         // #[cfg(feature = "shard")]
-        let sender = t.sender();
+        let sender = t.original_sender();
         // debug!(target: "miner", "transaction looks like {:?}", t);
-        let t= if !t.contains_balance(){
+        let mut t= if !t.contains_balance(){
             let balance = self.state.balance(&sender)?;
             t.with_balance(balance)
         } else{
             t
         };
+        // #[cfg(feature = "shard")]
+        //clear address txn vec and add original sender's address only if transaction is complete.
+        self.block.state.clear_address_txn_vec();
+        if !t.is_incomplete() && t.is_shard(){
+            self.block.state.push_address_txn_vec(sender);
+        }
+        self.block.state.clear_hash_map_cache();
+        //set is_create_txn flag
+        if !t.is_shard(){
+            self.block.state.set_is_create_txn(true);
+        }else {
+            self.block.state.set_is_create_txn(false);
+        }
+        let mut outcome = self.block.state.default_apply_result().unwrap();
+        match self.block.state.get_mined_status(){
+            Some(true) => {
+                if !t.tx().data.is_empty(){
+                    if !t.is_incomplete(){
+                        if !t.is_shard(){ //mined, smart-contract, complete, legacy = CREATE
+                            self.block.state.clear_data_hashmap_txn();
+                            self.block.state.set_next_shard(999u64);
+                            self.block.state.set_txn_status(Some(true));
+                            outcome = self.block.state.apply(
+                                &env_info,
+                                self.engine.machine(),
+                                &t,
+                                self.block.traces.is_enabled(),
+                            )?;
+                        }else {
+                            //mined, smart-contract, complete, shard = new txn
+                            self.block.state.clear_data_hashmap_txn();
+                            self.block.state.set_next_shard(999u64);
+                            for (key, val) in t.shard_data_hashmap().iter() {
+                                self.block.state.hash_map_txn_insert(key.clone(), val.clone())
+                            }
+                            self.block.state.set_txn_status(None);
+                            outcome = self.block.state.apply(
+                                &env_info,
+                                self.engine.machine(),
+                                &t,
+                                self.block.traces.is_enabled(),
+                            )?;
+                            if self.block.state.txn_complete_status() == None {
+                                self.block.state.set_txn_status(Some(true));
+                                outcome = self.block.state.apply(
+                                    &env_info,
+                                    self.engine.machine(),
+                                    &t,
+                                    self.block.traces.is_enabled(),
+                                )?;
+                                t.hash_map_replace_with(self.block.state.data_hashmap_txn());
+                            } else {
+                                t.hash_map_replace_with(self.block.state.data_hashmap_txn());
+                                t.set_next_shard(self.block.state.get_next_shard());
+                                t.set_incomplete(1u64);
+                            }
 
-        let outcome = self.block.state.apply(
-            &env_info,
-            self.engine.machine(),
-            &t,
-            self.block.traces.is_enabled(),
-        )?;
+                        }
+                    } else{ // mined, smart-contract, incomplete
+                        self.block.state.clear_data_hashmap_txn();
+                        self.block.state.set_next_shard(999u64);
+                        for (key, val) in t.shard_data_hashmap().iter() {
+                            self.block.state.hash_map_txn_insert(key.clone(), val.clone())
+                        }
+                        self.block.state.set_txn_status(None);
+                        outcome = self.block.state.apply(
+                            &env_info,
+                            self.engine.machine(),
+                            &t,
+                            self.block.traces.is_enabled(),
+                        )?;
+                        if self.block.state.txn_complete_status() == None {
+                            self.block.state.set_txn_status(Some(true));
+                            outcome = self.block.state.apply(
+                                &env_info,
+                                self.engine.machine(),
+                                &t,
+                                self.block.traces.is_enabled(),
+                            )?;
+                            t.hash_map_replace_with(self.block.state.data_hashmap_txn());
+                        } else {
+                            t.hash_map_replace_with(self.block.state.data_hashmap_txn());
+                            t.set_next_shard(self.block.state.get_next_shard());
+                            t.set_incomplete(1u64);
+                        }
+                    }
+                } else{ //mined, CALL transfer
+                    self.block.state.clear_data_hashmap_txn();
+                    self.block.state.set_next_shard(999u64);
+                    for (key, val) in t.shard_data_hashmap().iter() {
+                        self.block.state.hash_map_txn_insert(key.clone(), val.clone())
+                    }
+                    self.block.state.set_txn_status(Some(true));
+                    outcome = self.block.state.apply(
+                        &env_info,
+                        self.engine.machine(),
+                        &t,
+                        self.block.traces.is_enabled(),
+                    )?;
+                }
+            }
+            _ => {if t.is_incomplete(){//enact, incomplete
+                //do nothing in terms of state.apply
+                if t.get_next_shard() == AggProof::get_shard(){
+                    self.block.state.push_incomplete_txn(t.clone());
+                }
+            } else{ //enact, complete
+                self.block.state.clear_data_hashmap_txn();
+                self.block.state.set_next_shard(999u64);
+                for (key, val) in t.shard_data_hashmap().iter() {
+                    self.block.state.hash_map_txn_insert(key.clone(), val.clone())
+                }
+                self.block.state.set_txn_status(Some(true));
+                outcome = self.block.state.apply(
+                    &env_info,
+                    self.engine.machine(),
+                    &t,
+                    self.block.traces.is_enabled(),
+                )?;
+            }
 
+            }
+        }
+
+
+
+        // if t.is_incomplete() && self.block.state.get_mined_status()==Some(false){
+        //     // do nothing
+        // } else {
+        //     self.block.state.clear_data_hashmap_txn();
+        //     self.block.state.set_next_shard(999u64);
+        //     for (key, val) in t.shard_data_hashmap().iter() {
+        //         self.block.state.hash_map_txn_insert(key.clone(), val.clone())
+        //     }
+        //     if self.block.state.get_mined_status()==Some(true){
+        //         self.block.state.set_txn_status(None);
+        //     } else {
+        //         self.block.state.set_txn_status(Some(true));
+        //     }
+        //     if !t.is_shard(){
+        //         //set true for legacy CREATE transactions
+        //         self.block.state.set_txn_status(Some(true));
+        //     }
+        //     outcome = self.block.state.apply(
+        //         &env_info,
+        //         self.engine.machine(),
+        //         &t,
+        //         self.block.traces.is_enabled(),
+        //     )?;
+        //     if !t.tx().data.is_empty() && self.block.state.txn_complete_status() == None && t.is_shard() && self.block.state.get_mined_status()==Some(true){
+        //         self.block.state.set_txn_status(Some(true));
+        //         outcome = self.block.state.apply(
+        //             &env_info,
+        //             self.engine.machine(),
+        //             &t,
+        //             self.block.traces.is_enabled(),
+        //         )?;
+        //         t.hash_map_replace_with(self.block.state.data_hashmap_txn());
+        //     } else {
+        //         if !t.tx().data.is_empty() && t.is_shard() && self.block.state.txn_complete_status() == Some(false){
+        //             t.hash_map_replace_with(self.block.state.data_hashmap_txn());
+        //             t.set_next_shard(self.block.state.get_next_shard());
+        //             t.set_incomplete(1u64);
+        //         }else {
+        //             //do nothing
+        //         }
+        //     }
+        // }
         self.block
             .transactions_set
             .insert(h.unwrap_or_else(|| t.hash()));
@@ -478,7 +647,13 @@ impl<'x> OpenBlock<'x> {
 
         Ok(LockedBlock { block: s.block })
     }
+    pub fn set_hash_map_global(&mut self, h: Vec<HashMap<Address,U256>>){
+        self.block.state.set_hash_map_global(h);
+    }
 
+    pub fn set_hash_map_round_beginning(&mut self, h: HashMap<Address,U256>){
+        self.block.state.set_hash_map_round_beginning(h);
+    }
     #[cfg(test)]
     /// Return mutable block reference. To be used in tests only.
     pub fn block_mut(&mut self) -> &mut ExecutedBlock {
@@ -621,6 +796,8 @@ pub(crate) fn enact(
     parent: &Header,
     last_hashes: Arc<LastHashes>,
     factories: Factories,
+    hash_map_global: Vec<HashMap<Address, U256>>,
+    hash_map_round_beginning: HashMap<Address,U256>,
     is_epoch_begin: bool,
     ancestry: &mut dyn Iterator<Item = ExtendedHeader>,
 ) -> Result<LockedBlock, Error> {
@@ -667,9 +844,15 @@ pub(crate) fn enact(
             AggProof::set_last_commit_shard(block_number);
         }
     }
+
+    //set mined status to false in the state
+    // #[cfg(feature = "shard")]
+    b.block.state.set_mined_status(Some(false));
+    // set the hash_maps (global and beginning round)
+    b.block.state.set_hash_map_global(hash_map_global);
+    b.block.state.set_hash_map_round_beginning(hash_map_round_beginning);
     // t_nb 8.2 transfer all field from current header to OpenBlock header that we created
     b.populate_from(&header);
-
     // t_nb 8.3 execute transactions one by one
     b.push_transactions(transactions)?;
 
@@ -691,6 +874,9 @@ pub fn enact_verified(
     parent: &Header,
     last_hashes: Arc<LastHashes>,
     factories: Factories,
+    // #[cfg(feature = "shard")]
+    hash_map_global: Vec<HashMap<Address,U256>>,
+    hash_map_round_beginning: HashMap<Address, U256>,
     is_epoch_begin: bool,
     ancestry: &mut dyn Iterator<Item = ExtendedHeader>,
 ) -> Result<LockedBlock, Error> {
@@ -704,6 +890,8 @@ pub fn enact_verified(
         parent,
         last_hashes,
         factories,
+        hash_map_global,
+        hash_map_round_beginning,
         is_epoch_begin,
         ancestry,
     )
@@ -771,6 +959,7 @@ mod tests {
         )?;
 
         b.populate_from(&header);
+        b.state.set_mined_status(Some(false));
         b.push_transactions(transactions)?;
 
         for u in block.uncles {

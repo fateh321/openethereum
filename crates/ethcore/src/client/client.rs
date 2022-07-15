@@ -26,6 +26,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use std::collections::HashMap;
 
 use blockchain::{
     BlockChain, BlockChainDB, BlockNumberKey, BlockProvider, BlockReceipts, ExtrasInsert,
@@ -107,6 +108,7 @@ use db::{keys::BlockDetails, Readable, Writable};
 pub use reth_util::queue::ExecutionQueue;
 pub use types::{block_status::BlockStatus, blockchain_info::BlockChainInfo};
 pub use verification::QueueInfo as BlockQueueInfo;
+use hyperproofs::AggProof;
 use_contract!(registry, "res/contracts/registrar.json");
 
 const ANCIENT_BLOCKS_QUEUE_SIZE: usize = 4096;
@@ -453,9 +455,12 @@ impl Importer {
             }
         };
 
-        let chain = client.chain.read();
+        // let chain = client.chain.read();
+        // putting chain in scope for timely destruction
         // t_nb 7.3 verify block family
-        let verify_family_result = self.verifier.verify_block_family(
+        let verify_family_result = {
+            let chain = client.chain.read();
+           let x = self.verifier.verify_block_family(
             &header,
             &parent,
             engine,
@@ -465,6 +470,8 @@ impl Importer {
                 client,
             }),
         );
+            x
+        };
 
         if let Err(e) = verify_family_result {
             warn!(target: "client", "Stage 3 block verification failed for #{} ({})\nError: {:?}", header.number(), header.hash(), e);
@@ -487,7 +494,7 @@ impl Importer {
             .read()
             .boxed_clone_canon(header.parent_hash());
 
-        let is_epoch_begin = chain
+        let is_epoch_begin = client.chain.read()
             .epoch_transition(parent.number(), *header.parent_hash())
             .is_some();
 
@@ -536,19 +543,39 @@ impl Importer {
                 };
             }
         }
+        // #[cfg(feature = "shard")]
+        // resize hash_map_global and clear hash_map_round_beginning
+        let block_number = block.header.number().clone();
+        if block_number.rem_euclid(AggProof::shard_count()) ==0{
+            let chain_wr = client.chain.write();
+            chain_wr.data_hash_map_round_beginning.write().clear();
+            let mut _h = chain_wr.data_hash_map_global.write();
+            if _h.len() == 5{
+                _h.remove(0);
+                _h.push(HashMap::new());
+            }else {
+                _h.push(HashMap::new());
+            }
 
+        }
         // t_nb 8.0 Block enacting. Execution of transactions.
-        let enact_result = enact_verified(
-            block,
-            engine,
-            client.tracedb.read().tracing_enabled(),
-            db,
-            &parent,
-            last_hashes,
-            client.factories.clone(),
-            is_epoch_begin,
-            &mut chain.ancestry_with_metadata_iter(*header.parent_hash()),
-        );
+        let enact_result = {
+            let chain = client.chain.read();
+           let x =  enact_verified(
+                block,
+                engine,
+                client.tracedb.read().tracing_enabled(),
+                db,
+                &parent,
+                last_hashes,
+                client.factories.clone(),
+                chain.data_hash_map_global.read().clone(),
+                chain.data_hash_map_round_beginning.read().clone(),
+                is_epoch_begin,
+                &mut chain.ancestry_with_metadata_iter(*header.parent_hash()),
+            );
+            x
+        };
 
         let mut locked_block = match enact_result {
             Ok(b) => b,
@@ -557,7 +584,28 @@ impl Importer {
                 bail!(e);
             }
         };
-
+        // #[cfg(feature = "shard")]
+        //change hashmap of the state
+        {
+            let mut chain_wr = client.chain.write();
+            let mut h_global = chain_wr.data_hash_map_global.write();
+            let mut h_round_beginning = chain_wr.data_hash_map_round_beginning.write();
+            let mut incomplete_txn = chain_wr.incomplete_txn.write();
+            let hashmap_global = locked_block.state.export_data_hashmap_global();
+            let hashmap_round_beginning = locked_block.state.export_data_hashmap_round_beginning();
+            let i_txn = locked_block.state.export_incomplete_txn();
+            {
+                *h_global = hashmap_global;
+            }
+            {
+                *h_round_beginning = hashmap_round_beginning;
+            }
+            {   // we push transactions permanently to blockchain
+                for i_t in i_txn {
+                    incomplete_txn.push(i_t);
+                }
+            }
+        }
         // t_nb 7.6 Strip receipts for blocks before validate_receipts_transition,
         // if the expected receipts root header does not match.
         // (i.e. allow inconsistency in receipts outcome before the transition block)
@@ -3051,7 +3099,10 @@ impl PrepareOpenBlock for Client {
             chain.ancestry_with_metadata_iter(best_header.hash()),
             sr,
         )?;
-
+        // #[cfg(feature = "shard")]
+        // set the global and round_beginning hashmaps
+        open_block.set_hash_map_global(chain.data_hash_map_global.read().clone());
+        open_block.set_hash_map_round_beginning(chain.data_hash_map_round_beginning.read().clone());
         // Add uncles
         chain
             .find_uncle_headers(&h, MAX_UNCLE_AGE)
@@ -3074,6 +3125,46 @@ impl PrepareOpenBlock for Client {
             });
 
         Ok(open_block)
+    }
+    fn import_hash_map_in_chain(&self, hash_map_global: Vec<HashMap<Address, U256>>, hash_map_round_beginning: HashMap<Address, U256>) {
+        let mut chain = self.chain.write();
+        let mut h_global = chain.data_hash_map_global.write();
+        let mut h_round_beginning = chain.data_hash_map_round_beginning.write();
+        {
+            *h_global = hash_map_global;
+        }
+        {
+            *h_round_beginning = hash_map_round_beginning;
+        }
+
+    }
+
+    fn export_incomplete_txn(&self) -> Vec<SignedTransaction> {
+        self.chain.read().incomplete_txn.read().clone()
+    }
+    fn clear_incomplete_txn(&self) {
+        {
+            self.chain.write().incomplete_txn.write().clear();
+        }
+    }
+    fn clear_data_hash_map_global(&self) {
+        {
+            self.chain.write().data_hash_map_global.write().clear();
+        }
+    }
+    fn clear_data_hash_map_round_beginning(&self) {
+            let mut chain = self.chain.write();
+            chain.data_hash_map_round_beginning.write().clear();
+    }
+    fn resize_hash_map_global(&self) {
+            let mut chain = self.chain.write();
+            let mut h = chain.data_hash_map_global.write();
+            if h.len() == 5 {
+                h.remove(0);
+                h.push(HashMap::new());
+            } else {
+                h.push(HashMap::new());
+            }
     }
 }
 

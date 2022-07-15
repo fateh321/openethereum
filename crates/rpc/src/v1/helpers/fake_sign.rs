@@ -15,12 +15,13 @@
 // along with OpenEthereum.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::cmp::min;
+use std::collections::HashMap;
 use types::transaction::{
     AccessListTx, Action, EIP1559TransactionTx, ShardTransactionTx, SignedTransaction, Transaction, TypedTransaction,
     TypedTxId,
 };
 
-use ethereum_types::U256;
+use ethereum_types::{Address, U256};
 use jsonrpc_core::{Error, ErrorCode};
 use v1::helpers::CallRequest;
 
@@ -74,7 +75,10 @@ pub fn sign_call(request: CallRequest) -> Result<SignedTransaction, Error> {
         Some(TypedTxId::ShardTransaction) => TypedTransaction::ShardTransaction(ShardTransactionTx {
             transaction:tx_legacy,
             shard: 999u64,
-            shard_data_list:Vec::new(),
+            next_shard:999u64,
+            incomplete: 0u64,
+            original_sender:from,
+            shard_data_list:HashMap::new(),
             shard_proof_list:Vec::new(),
             shard_proof: String::new(),
         }),

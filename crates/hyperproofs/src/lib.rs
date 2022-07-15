@@ -19,6 +19,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 use ethereum_types::{Address, BigEndianHash, H160, H256, U256};
 use std::str::FromStr;
+use keccak_hash::keccak;
 
 static mut SHARD: u64 = 0u64;
 static mut LASTCOMMITROUND: u64 = 999u64;
@@ -37,6 +38,10 @@ impl AggProof{
             address: Vec::new(),
             balance: Vec::new(),
         }
+    }
+    pub fn concat_hash(x: H160, y: H256) -> H160{
+        let l = keccak([x.as_bytes(), y.as_bytes()].concat());
+        H160::from(l)
     }
     pub fn create_proof(&mut self) -> (){
         if self.address.len() == 0{

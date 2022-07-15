@@ -7,7 +7,7 @@ const addressFrom = '0xeA404440859F0503f8959759766eF56A494A6f8C';
 const addressTo0 = '0x65e154ef9a2967e922936415bb0e2204be87b64c';
 const addressTo1 = '0x65e154ef9a2967e922936415bb0e2204be87b64b';
 const web0 = new Web3('http://localhost:8540');
-const web1 = new Web3('http://localhost:8540');
+const web1 = new Web3('http://localhost:8541');
 
 // Create transaction
 const deploy0 = async () => {
@@ -36,14 +36,14 @@ const deploy0 = async () => {
 
 const deploy1 = async () => {
    console.log(
-      `Attempting to make transaction from ${addressFrom} to ${addressTo1}`
+      `Attempting to make transaction from ${addressFrom} to ${addressTo0}`
    );
 
-   const createTransaction = await web1.eth.accounts.signTransaction(
+   const createTransaction = await web0.eth.accounts.signTransaction(
       {
          from: addressFrom,
-         to: addressTo1,
-         value: web1.utils.toWei('100', 'ether'),
+         to: addressTo0,
+         value: web0.utils.toWei('10', 'ether'),
          gas: '21000',
       },
       privKey
@@ -58,8 +58,9 @@ const deploy1 = async () => {
    // );
 };
 
+
 deploy0();
-// deploy1();
+deploy1();
 
 
 

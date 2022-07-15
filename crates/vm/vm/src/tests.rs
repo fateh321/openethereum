@@ -168,6 +168,40 @@ impl FakeExt {
 }
 
 impl Ext for FakeExt {
+
+    fn origin_address(&self) -> Address{
+        Address::zero()
+    }
+    fn push_address_txn_vec(&mut self, a: Address) {    }
+    fn hash_map_storage_at(&self, key: &Address) ->(U256, bool){
+        (U256::zero(), true)
+    }
+    fn hash_map_beginning_storage_at(&self, key: &Address) ->(U256, bool){(U256::zero(), true)}
+    fn hash_map_txn_insert(&self, key: Address, val: U256){
+
+    }
+    fn is_create_txn(&self) -> bool {
+        false
+    }
+    fn hash_map_beginning_insert(&self, key: Address, val: U256){
+
+    }
+    fn hash_map_cache_insert(&self, key: Address, val: U256){
+
+    }
+    fn hash_map_global_insert(&self, key: Address, val: U256){
+
+    }
+    fn set_txn_incomplete(&mut self){
+
+    }
+
+    fn set_next_shard(&mut self, shard: u64){
+
+    }
+    fn txn_complete_status(&mut self) -> Option<bool>{
+        None
+    }
     fn initial_storage_at(&self, key: &H256) -> Result<H256> {
         match self.initial_store.get(key) {
             Some(value) => Ok(*value),

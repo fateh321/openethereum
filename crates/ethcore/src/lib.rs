@@ -112,6 +112,7 @@ extern crate fetch;
 
 #[cfg(all(test, feature = "price-info"))]
 extern crate parity_runtime;
+extern crate core;
 
 pub mod block;
 pub mod client;

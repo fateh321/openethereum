@@ -48,7 +48,7 @@ use ethcore_db::{
     keys::{BlockDetails, BlockReceipts, EpochTransitions, TransactionAddress, EPOCH_KEY_PREFIX},
     CacheUpdatePolicy, Readable, Writable,
 };
-use ethereum_types::{Bloom, BloomRef, H256, U256};
+use ethereum_types::{Address, Bloom, BloomRef, H256, U256};
 use itertools::Itertools;
 use log::{info, trace, warn};
 use parity_bytes::Bytes;
@@ -57,6 +57,7 @@ use parking_lot::{Mutex, RwLock};
 use parking_lot::lock_api::RwLockWriteGuard;
 use rayon::prelude::*;
 use rlp::RlpStream;
+use common_types::transaction::SignedTransaction;
 use rlp_compress::{blocks_swapper, compress, decompress};
 use stats::PrometheusMetrics;
 
@@ -279,6 +280,12 @@ pub struct BlockChain {
     pub eip1559_transition: BlockNumber,
     //new state root should be here
     pub shard_state_root: RwLock<(H256, BlockNumber)>,
+    //stores latest data modified for the last 10 rounds. 11th hashmap is popped every round and new hashmap is pushed on top.
+    pub data_hash_map_global: RwLock<Vec<HashMap<Address, U256>>>,
+    //this keeps track of the data at the beginning of each round. Key, val is pushed whenever SStore occurs and no key exists in hashmap
+    pub data_hash_map_round_beginning: RwLock<HashMap<Address, U256>>,
+    // All the incomplete txn with next_shard equal to my shard gets collected here.
+    pub incomplete_txn: RwLock<Vec<SignedTransaction>>,
 }
 
 impl BlockProvider for BlockChain {
@@ -670,6 +677,9 @@ impl BlockChain {
             pending_transaction_addresses: RwLock::new(HashMap::new()),
             eip1559_transition,
             shard_state_root: RwLock::new((H256::default(), 999u64)),
+            data_hash_map_global: RwLock::new(Vec::new()),
+            data_hash_map_round_beginning: RwLock::new(HashMap::new()),
+            incomplete_txn: RwLock::new(Vec::new()),
         };
 
         // load best block

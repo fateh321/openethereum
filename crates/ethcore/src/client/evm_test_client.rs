@@ -292,12 +292,12 @@ impl<'a> EvmTestClient<'a> {
                 end_state: (self.dump_state)(&self.state),
             });
         }
-
+        let mut transaction = transaction;
         // Apply transaction
         let result = self.state.apply_with_tracing(
             &env_info,
             self.spec.engine.machine(),
-            &transaction,
+            &mut transaction,
             tracer,
             vm_tracer,
         );
