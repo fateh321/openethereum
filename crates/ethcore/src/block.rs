@@ -353,7 +353,11 @@ impl<'x> OpenBlock<'x> {
         let sender = t.original_sender();
         // debug!(target: "miner", "transaction looks like {:?}", t);
         let mut t= if !t.contains_balance(){
-            let balance = self.state.balance(&sender)?;
+            let mut balance = self.state.balance(&sender)?;
+            let mut begin_round_balance = self.state.hash_map_beginning_storage_at(&sender);
+            if begin_round_balance.1 {
+                balance = begin_round_balance.0;
+            }
             t.with_balance(balance)
         } else{
             t
@@ -377,6 +381,7 @@ impl<'x> OpenBlock<'x> {
                 if !t.tx().data.is_empty(){
                     if !t.is_incomplete(){
                         if !t.is_shard(){ //mined, smart-contract, complete, legacy = CREATE
+                            debug!(target: "txn", "legacy state.apply() from miner");
                             self.block.state.clear_data_hashmap_txn();
                             self.block.state.set_next_shard(999u64);
                             self.block.state.set_txn_status(Some(true));
@@ -388,19 +393,24 @@ impl<'x> OpenBlock<'x> {
                             )?;
                         }else {
                             //mined, smart-contract, complete, shard = new txn
+                            debug!(target: "txn", "complete txn, shard state.apply() from miner with None flag");
                             self.block.state.clear_data_hashmap_txn();
+                            self.block.state.clear_hash_map_cache();
                             self.block.state.set_next_shard(999u64);
                             for (key, val) in t.shard_data_hashmap().iter() {
                                 self.block.state.hash_map_txn_insert(key.clone(), val.clone())
                             }
                             self.block.state.set_txn_status(None);
-                            outcome = self.block.state.apply(
+                            outcome = self.block.state.fake_apply(
                                 &env_info,
                                 self.engine.machine(),
                                 &t,
                                 self.block.traces.is_enabled(),
                             )?;
                             if self.block.state.txn_complete_status() == None {
+                                debug!(target: "txn", "complete txn, shard state.apply() from miner again with Some(true)");
+                                //clear cache
+                                self.block.state.clear_hash_map_cache();
                                 self.block.state.set_txn_status(Some(true));
                                 outcome = self.block.state.apply(
                                     &env_info,
@@ -410,6 +420,7 @@ impl<'x> OpenBlock<'x> {
                                 )?;
                                 t.hash_map_replace_with(self.block.state.data_hashmap_txn());
                             } else {
+                                debug!(target: "txn", "complete txn from miner set to incomplete");
                                 t.hash_map_replace_with(self.block.state.data_hashmap_txn());
                                 t.set_next_shard(self.block.state.get_next_shard());
                                 t.set_incomplete(1u64);
@@ -417,34 +428,42 @@ impl<'x> OpenBlock<'x> {
 
                         }
                     } else{ // mined, smart-contract, incomplete
+                    debug!(target: "txn", "incomplete txn from miner state.apply() with None flag");
                         self.block.state.clear_data_hashmap_txn();
+                        self.block.state.clear_hash_map_cache();
                         self.block.state.set_next_shard(999u64);
                         for (key, val) in t.shard_data_hashmap().iter() {
                             self.block.state.hash_map_txn_insert(key.clone(), val.clone())
                         }
                         self.block.state.set_txn_status(None);
-                        outcome = self.block.state.apply(
+                        outcome = self.block.state.fake_apply(
                             &env_info,
                             self.engine.machine(),
                             &t,
                             self.block.traces.is_enabled(),
                         )?;
                         if self.block.state.txn_complete_status() == None {
+                            debug!(target: "txn", "incomplete txn from miner state.apply() with Some(true) flag");
                             self.block.state.set_txn_status(Some(true));
+                            //clear cache
+                            self.block.state.clear_hash_map_cache();
                             outcome = self.block.state.apply(
                                 &env_info,
                                 self.engine.machine(),
                                 &t,
                                 self.block.traces.is_enabled(),
                             )?;
+                            t.set_incomplete(0u64);
                             t.hash_map_replace_with(self.block.state.data_hashmap_txn());
                         } else {
+                            debug!(target: "txn", "incomplete txn from miner set to incomplete again");
                             t.hash_map_replace_with(self.block.state.data_hashmap_txn());
                             t.set_next_shard(self.block.state.get_next_shard());
                             t.set_incomplete(1u64);
                         }
                     }
                 } else{ //mined, CALL transfer
+                debug!(target: "txn", "CALL transfer txn from miner");
                     self.block.state.clear_data_hashmap_txn();
                     self.block.state.set_next_shard(999u64);
                     for (key, val) in t.shard_data_hashmap().iter() {
@@ -461,10 +480,13 @@ impl<'x> OpenBlock<'x> {
             }
             _ => {if t.is_incomplete(){//enact, incomplete
                 //do nothing in terms of state.apply
+            debug!(target: "txn", "incomplete txn in enact, do nothing");
+                self.block.state.inc_nonce(&t.sender())?;
                 if t.get_next_shard() == AggProof::get_shard(){
                     self.block.state.push_incomplete_txn(t.clone());
                 }
             } else{ //enact, complete
+            debug!(target: "txn", "complete txn in enact, just state.apply()");
                 self.block.state.clear_data_hashmap_txn();
                 self.block.state.set_next_shard(999u64);
                 for (key, val) in t.shard_data_hashmap().iter() {
@@ -529,6 +551,7 @@ impl<'x> OpenBlock<'x> {
         self.block
             .transactions_set
             .insert(h.unwrap_or_else(|| t.hash()));
+        debug!(target: "txn", "push_txn, pushing t in the block with hashmap {:?}", t.shard_data_hashmap());
         self.block.transactions.push(t.into());
         if let Tracing::Enabled(ref mut traces) = self.block.traces {
             traces.push(outcome.trace.into());

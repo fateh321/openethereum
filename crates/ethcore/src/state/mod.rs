@@ -992,7 +992,28 @@ impl<B: Backend> State<B> {
             }
         }
         AggProof::pushAddressDelta(a.to_low_u64_be().rem_euclid(2u64.pow(16)), incr.to_string(), a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
-        println!("increasing {} from address {} in shard {}", incr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+        debug!(target:"txn", "increasing {} from address {} in shard {}", incr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+        if !incr.is_zero() {
+            println!("increasing {} from address {} in shard {}", incr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+            let mut balance = self.data_hash_map_txn_storage_at(a);
+            if balance.1 {
+                let temp_val = self.global_hash_map_storage_at(a);
+                if temp_val.1 {
+                    balance = temp_val;
+                }
+            } else {
+                if self.data_hash_map_global.borrow().len() > 0 {
+                    println!("the balance should exist");
+                }
+            }
+            let new_bal = balance.0.saturating_add(incr.clone());
+            if self.data_hash_map_global.borrow().len() > 0 {
+                self.global_hash_map_insert(a.clone(), new_bal);
+                if !self.hash_map_beginning_storage_at(a).1 {
+                    self.hash_map_beginning_insert(a.clone(), balance.0);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1017,7 +1038,28 @@ impl<B: Backend> State<B> {
         let val = decr.to_string();
         neg.push_str(&val);
         AggProof::pushAddressDelta(a.to_low_u64_be().rem_euclid(2u64.pow(16)), neg.clone(), a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
-        println!("decreasing {} from address {} in shard {}", decr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+        debug!(target: "txn","decreasing {} from address {} in shard {}", decr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+        if !decr.is_zero() {
+            println!("decreasing {} from address {} in shard {}", decr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+            let mut balance = self.data_hash_map_txn_storage_at(a);
+            if balance.1 {
+                let temp_val = self.global_hash_map_storage_at(a);
+                if temp_val.1 {
+                    balance = temp_val;
+                }
+            } else {
+                if self.data_hash_map_global.borrow().len() > 0 {
+                    println!("the balance should exist");
+                }
+            }
+            let new_bal = balance.0.saturating_sub(decr.clone());
+            if self.data_hash_map_global.borrow().len() > 0 {
+                self.global_hash_map_insert(a.clone(), new_bal);
+                if !self.hash_map_beginning_storage_at(a).1 {
+                    self.hash_map_beginning_insert(a.clone(), balance.0);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1073,7 +1115,21 @@ impl<B: Backend> State<B> {
         .reset_code(code);
         Ok(())
     }
-
+    pub fn fake_apply(
+        &mut self,
+        env_info: &EnvInfo,
+        machine: &Machine,
+        t: &SignedTransaction,
+        tracing: bool,
+    ) -> ApplyResult<FlatTrace, VMTrace> {
+        if tracing {
+            let options = TransactOptions::with_tracing();
+            self.fake_apply_with_tracing(env_info, machine, t, options.tracer, options.vm_tracer)
+        } else {
+            let options = TransactOptions::with_no_tracing();
+            self.fake_apply_with_tracing(env_info, machine, t, options.tracer, options.vm_tracer)
+        }
+    }
     /// Execute a given transaction, producing a receipt and an optional trace.
     /// This will change the state accordingly.
     pub fn apply(
@@ -1092,6 +1148,55 @@ impl<B: Backend> State<B> {
         }
     }
 
+    pub fn fake_apply_with_tracing<V, T>(
+        &mut self,
+        env_info: &EnvInfo,
+        machine: &Machine,
+        t: &SignedTransaction,
+        tracer: T,
+        vm_tracer: V,
+    ) -> ApplyResult<T::Output, V::Output>
+        where
+            T: trace::Tracer,
+            V: trace::VMTracer,
+    {   debug!(target: "txn", "inside fake_apply_with_tracing");
+        let options = TransactOptions::new(tracer, vm_tracer);
+        let e = self.fake_execute(env_info, machine, t, options, false)?;
+        let params = machine.params();
+
+        let eip658 = env_info.number >= params.eip658_transition;
+        let no_intermediate_commits = eip658
+            || (env_info.number >= params.eip98_transition
+            && env_info.number >= params.validate_receipts_transition);
+
+        let outcome = if no_intermediate_commits {
+            debug!(target: "txn", "eip658 is {}, eip98 is {}, validate reciep transition is {}",params.eip658_transition,params.eip98_transition,params.validate_receipts_transition );
+            if eip658 {
+                TransactionOutcome::StatusCode(if e.exception.is_some() { 0 } else { 1 })
+            } else {
+                TransactionOutcome::Unknown
+            }
+
+        } else {
+            debug!(target: "txn", "commiting in fake apply with tracing");
+            self.commit()?;
+            TransactionOutcome::StateRoot(self.root().clone())
+        };
+
+        let output = e.output;
+        let receipt = TypedReceipt::new(
+            t.tx_type(),
+            LegacyReceipt::new(outcome, e.cumulative_gas_used, e.logs),
+        );
+        trace!(target: "state", "Transaction receipt: {:?}", receipt);
+
+        Ok(ApplyOutcome {
+            receipt,
+            output,
+            trace: e.trace,
+            vm_trace: e.vm_trace,
+        })
+    }
     /// Execute a given transaction with given tracer and VM tracer producing a receipt and an optional trace.
     /// This will change the state accordingly.
     pub fn apply_with_tracing<V, T>(
@@ -1105,7 +1210,7 @@ impl<B: Backend> State<B> {
     where
         T: trace::Tracer,
         V: trace::VMTracer,
-    {
+    {   debug!(target: "txn", "inside apply_with_tracing");
         let options = TransactOptions::new(tracer, vm_tracer);
         let e = self.execute(env_info, machine, t, options, false)?;
         let params = machine.params();
@@ -1159,13 +1264,32 @@ impl<B: Backend> State<B> {
     {
         let schedule = machine.schedule(env_info.number);
         let mut e = Executive::new(self, env_info, machine, &schedule);
-
+        debug!(target: "txn", "inside execute");
         match virt {
             true => e.transact_virtual(t, options),
             false => e.transact(t, options),
         }
     }
-
+    fn fake_execute<T, V>(
+        &mut self,
+        env_info: &EnvInfo,
+        machine: &Machine,
+        t: &SignedTransaction,
+        options: TransactOptions<T, V>,
+        virt: bool,
+    ) -> Result<Executed<T::Output, V::Output>, ExecutionError>
+        where
+            T: trace::Tracer,
+            V: trace::VMTracer,
+    {
+        let schedule = machine.schedule(env_info.number);
+        let mut e = Executive::new(self, env_info, machine, &schedule);
+        debug!(target: "txn", "inside fake_execute");
+        match virt {
+            true => e.transact_virtual(t, options),
+            false => e.fake_transact(t, options),
+        }
+    }
     fn touch(&mut self, a: &Address) -> TrieResult<()> {
         self.require(a, false)?;
         Ok(())

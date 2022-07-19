@@ -421,9 +421,11 @@ where
                     self.finalize_remove(tx.hash());
                     self.listener.culled(&tx);
                 }
+                debug!(target: "txn", "removed_from_set len is {}", len);
                 len
             }
-            None => 0,
+            None => {debug!(target: "txn", "remove from set is NONE");
+                0},
         }
     }
 
@@ -555,7 +557,7 @@ where
     /// Computes the full status of the pool (including readiness).
     pub fn status<R: Ready<T>>(&self, mut ready: R) -> Status {
         let mut status = Status::default();
-
+        debug!(target: "txn", "staling the txn at 3");
         for (_sender, transactions) in &self.transactions {
             let len = transactions.len();
             for (idx, tx) in transactions.iter_transactions().enumerate() {
@@ -720,7 +722,7 @@ where
                     .take(&best)
                     .expect("Just taken from iterator; qed")
             };
-
+            debug!(target: "txn", "staling the txn at 4");
             let tx_state = self.ready.is_ready(&best.transaction);
             // Add the next best sender's transaction when applicable
             match tx_state {

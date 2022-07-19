@@ -76,7 +76,7 @@ impl<C: NonceClient> txpool::Ready<VerifiedTransaction> for State<C> {
             }
             _ => {}
         }
-
+        debug!(target: "txn", "staling the txn at 1");
         let sender = tx.sender();
         let state = &self.state;
         let state_nonce = || state.account_nonce(sender);
@@ -84,11 +84,18 @@ impl<C: NonceClient> txpool::Ready<VerifiedTransaction> for State<C> {
         match tx.transaction.tx().nonce.cmp(nonce) {
             // Before marking as future check for stale ids
             cmp::Ordering::Greater => match self.stale_id {
-                Some(id) if tx.insertion_id() < id => txpool::Readiness::Stale,
-                _ => txpool::Readiness::Future,
+                Some(id) if tx.insertion_id() < id => {
+                    debug!(target: "txn", "staling the txn at 1.1");
+                    txpool::Readiness::Stale},
+                _ => {
+                    debug!(target: "txn", "staling the txn at 1.2");
+                    txpool::Readiness::Future},
             },
-            cmp::Ordering::Less => txpool::Readiness::Stale,
+            cmp::Ordering::Less => {
+                debug!(target: "txn", "staling the txn at 1.3");
+                txpool::Readiness::Stale},
             cmp::Ordering::Equal => {
+                debug!(target: "txn", "staling the txn at 1.4");
                 *nonce = nonce.saturating_add(U256::from(1));
                 txpool::Readiness::Ready
             }
@@ -145,6 +152,7 @@ impl<C> OptionalState<C> {
 
 impl<C: Fn(&Address) -> Option<U256>> txpool::Ready<VerifiedTransaction> for OptionalState<C> {
     fn is_ready(&mut self, tx: &VerifiedTransaction) -> txpool::Readiness {
+        debug!(target: "txn", "staling the txn at 2");
         let sender = tx.sender();
         let state = &self.state;
         let nonce = self

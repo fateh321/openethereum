@@ -597,7 +597,7 @@ impl Miner {
         };
         let block_shard = AggProof::get_shard();
         let block_start = Instant::now();
-        debug!(target: "miner", "Attempting to push {} transactions.", engine_txs.len() + queue_txs.len());
+        debug!(target: "txn", "Attempting to push {} transactions.", engine_txs.len() + queue_txs.len());
         // #[cfg(feature = "shard")]
         debug!(target: "miner", "before waiting for proof");
         let (is_proof, proof) = if !self.proof_data.read().is_empty() {match self.channel_receiver.lock().recv() {
@@ -639,6 +639,7 @@ impl Miner {
                 // params.author.to_low_u64_be().rem_euclid(1);
             let match_shard = transaction.match_shard(block_shard);
             let _txn = transaction.clone();
+            debug!(target: "txn", "pushing txn from miner");
             let result = match match_shard {
               true =>   client
                       .verify_for_pending_block(&transaction, &open_block.header)
@@ -709,7 +710,10 @@ impl Miner {
                 // already have transaction - ignore
                 Err(Error(ErrorKind::Transaction(transaction::Error::AlreadyImported), _)) => {}
                 // #[cfg(feature = "shard")]
-                Err(Error(ErrorKind::Transaction(transaction::Error::SenderInvalidShard), _)) => {debug!(target: "miner", "Transaction sent to wrong shard {} txn is {:?}", block_shard, _txn);}
+                Err(Error(ErrorKind::Transaction(transaction::Error::SenderInvalidShard), _)) => {
+                    debug!(target: "txn", "Transaction sent to wrong shard {} txn is {:?}", block_shard, _txn);
+                    // not_allowed_transactions.insert(hash);
+                    }
                 Err(Error(ErrorKind::Transaction(transaction::Error::NotAllowed), _)) => {
                     not_allowed_transactions.insert(hash);
                     debug!(target: "miner", "Skipping non-allowed transaction for sender {:?}", hash);
@@ -1651,6 +1655,7 @@ impl miner::MinerService for Miner {
                         service_transaction_checker.as_ref(),
                     );
                     // t_nb 10.5 do culling
+                    debug!(target: "txn", "culling the txn at 1");
                     queue.cull(client);
                     // reseal is only used by InstaSeal engine
                     if engine.should_reseal_on_update() {
@@ -1664,6 +1669,7 @@ impl miner::MinerService for Miner {
                 }
             } else {
                 // t_nb 10.5 do culling
+                debug!(target: "txn", "culling the txn at 2");
                 self.transaction_queue.cull(client);
                 // reseal is only used by InstaSeal engine
                 if self.engine.should_reseal_on_update() {

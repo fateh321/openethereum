@@ -19,6 +19,7 @@ use std::{cmp, collections::HashMap};
 use super::Transaction;
 use crate::{pool, scoring, Readiness, Ready, ReplaceTransaction, Scoring, ShouldReplace};
 use ethereum_types::{H160 as Sender, U256};
+use log::debug;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum DummyScoringEvent {
@@ -126,6 +127,7 @@ impl NonceReady {
 
 impl Ready<Transaction> for NonceReady {
     fn is_ready(&mut self, tx: &Transaction) -> Readiness {
+        debug!(target: "txn", "staling the txn at 5");
         let min = self.1;
         let nonce = self.0.entry(tx.sender).or_insert_with(|| min);
         match tx.nonce.cmp(nonce) {

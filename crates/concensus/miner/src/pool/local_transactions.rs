@@ -236,6 +236,7 @@ impl txpool::Listener<Transaction> for LocalTransactionsList {
 
     fn culled(&mut self, tx: &Arc<Transaction>) {
         if !tx.priority().is_local() {
+            debug!(target: "txn", "returning from CULLED");
             return;
         }
 

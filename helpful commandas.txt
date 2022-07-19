@@ -1,0 +1,17 @@
+helpful commandas
+
+RUST_LOG=miner=trace target/release/openethereum --config node1.toml
+
+target/release/openethereum db kill --config node1.toml
+
+curl --data '{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x65e154ef9a2967e922936415bb0e2204be87b64c", "latest"],"id":1}' -H "Content-Type: application/json" -X POST localhost:8540
+
+curl --data '{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x93a88B7893FCDb130ab9209f63AB2e6854e617A1", "latest"],"id":1}' -H "Content-Type: application/json" -X POST localhost:8540
+
+curl --data '{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x00aa39d30f0d20ff03a22ccfc30b7efbfca597c2", "latest"],"id":1}' -H "Content-Type: application/json" -X POST localhost:8540
+
+eth_getTransactionReceipt
+
+CGO_ENABLED=1 go build -buildmode=c-shared -o libshard.so shard.go
+
+bindgen /home/srisht/libhyper/hyperproofs-go/libshard.h -o src/ffi.rs

@@ -1,0 +1,1 @@
+[{"constant":false,"inputs":[{"name":"_contract","type":"address"},{"name":"receiver","type":"address"},{"name":"numTokens","type":"uint256"}],"name":"dtransfer","outputs":[{"name":"","type":"bool"}],"payable":false,"stateMutability":"nonpayable","type":"function"},{"inputs":[{"name":"total","type":"uint256"}],"payable":false,"stateMutability":"nonpayable","type":"constructor"}]

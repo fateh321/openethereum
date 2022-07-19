@@ -1972,15 +1972,19 @@ impl Engine<EthereumMachine> for AuthorityRound {
         })?;
         let tx_request = TransactionRequest::call(Address::zero(), Bytes::new())
             .gas_price(U256::zero());
+        // let dummy_txn = full_client.create_shard_transaction(tx_request).unwrap();
+        // let mut current_nonce = dummy_txn.tx().nonce;
+        // transactions.push(dummy_txn);
         transactions.extend(full_client.create_shard_transaction(tx_request));
         for txn in block.state.export_incomplete_txn() {
             match txn.call_address(){
                 Some(a) => {
+                    // current_nonce = current_nonce.saturating_add(U256::from(1));
                     let tx_request = TransactionRequest::call(a, txn.tx().data.clone()).gas_price(U256::zero()).gas(txn.tx().gas);
                     let mut new_txn = full_client.create_shard_transaction(tx_request).unwrap();
                     new_txn.set_next_shard(999u64);
                     new_txn.set_incomplete(1u64);
-                    new_txn.change_original_sender(txn.sender());
+                    new_txn.change_original_sender(txn.original_sender());
                     new_txn.hash_map_replace_with(txn.shard_data_hashmap());
                     new_txn.set_shard(txn.get_next_shard());
                     transactions.push(new_txn);

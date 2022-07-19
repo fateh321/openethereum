@@ -16,7 +16,7 @@
 
 use std::{fmt, mem};
 
-use log::warn;
+use log::{debug, warn};
 use smallvec::SmallVec;
 
 use crate::{
@@ -221,6 +221,7 @@ impl<T: fmt::Debug, S: Scoring<T>> Transactions<T, S> {
     ) -> SmallVec<[Transaction<T>; PER_SENDER]> {
         let mut result = SmallVec::new();
         if self.is_empty() {
+            debug!(target: "txn", "returning empty result in cull");
             return result;
         }
 
@@ -235,6 +236,7 @@ impl<T: fmt::Debug, S: Scoring<T>> Transactions<T, S> {
         }
 
         if first_non_stalled == 0 {
+            debug!(target: "txn", "first non-stalled == 0");
             return result;
         }
 

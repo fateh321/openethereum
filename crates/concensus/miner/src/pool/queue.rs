@@ -311,6 +311,7 @@ impl TransactionQueue {
         client: C,
         transactions: Vec<verifier::Transaction>,
     ) -> Vec<Result<(), transaction::Error>> {
+        debug!(target: "txn", "entering import in queue");
         // Run verification
         trace_time!("pool::verify_and_import");
         let options = self.options.read().clone();
@@ -629,12 +630,14 @@ impl TransactionQueue {
             let senders = pool.senders().cloned().collect();
             senders
         };
+        debug!(target: "txn", "Senders to remove has length {} and {:?}", senders.len(), senders);
         for chunk in senders.chunks(CULL_SENDERS_CHUNK) {
             trace_time!("pool::cull::chunk");
             let state_readiness = ready::State::new(client.clone(), stale_id, nonce_cap);
             removed += self.pool.write().cull(Some(chunk), state_readiness);
         }
         debug!(target: "txqueue", "Removed {} stalled transactions. {}", removed, self.status());
+        debug!(target: "txn", "Removed {} stalled transactions. {}", removed, self.status());
     }
 
     /// Returns next valid nonce for given sender

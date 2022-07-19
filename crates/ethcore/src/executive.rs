@@ -1083,6 +1083,24 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         )
     }
 
+    pub fn fake_transact<T, V>(
+        &'a mut self,
+        t: &SignedTransaction,
+        options: TransactOptions<T, V>,
+    ) -> Result<Executed<T::Output, V::Output>, ExecutionError>
+        where
+            T: Tracer,
+            V: VMTracer,
+    {
+        self.fake_transact_with_tracer(
+            t,
+            options.check_nonce,
+            options.output_from_init_contract,
+            options.tracer,
+            options.vm_tracer,
+        )
+    }
+
     /// Execute a transaction in a "virtual" context.
     /// This will ensure the caller has enough balance to execute the desired transaction.
     /// Used for extra-block executions for things like consensus contracts and RPCs
@@ -1124,7 +1142,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         V: VMTracer,
     {
         let schedule = self.schedule;
-
+        debug!(target: "txn", "inside transact_with_tracer");
         // check if particualar transaction type is enabled at this block number in schedule
         match t.as_unsigned() {
             // #[cfg(feature = "shard")]
@@ -1146,7 +1164,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             TypedTransaction::Legacy(_) => (), //legacy transactions are allways valid
         };
         // #[cfg(feature = "shard")]
-        let sender = t.original_sender();
+        let mut sender = t.sender();
         let nonce = self.state.nonce(&sender)?;
 
         let mut base_gas_required = U256::from(t.tx().gas_required(&schedule));
@@ -1181,24 +1199,25 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             });
         }
 
-        if !t.is_unsigned()
-            && check_nonce
-            && schedule.kill_dust != CleanDustMode::Off
-            && !self.state.exists(&sender)?
-        {
-            return Err(ExecutionError::SenderMustExist);
-        }
+            if !t.is_unsigned()
+                && check_nonce
+                && schedule.kill_dust != CleanDustMode::Off
+                && !self.state.exists(&sender)?
+            {
+                return Err(ExecutionError::SenderMustExist);
+            }
+
+
 
         let init_gas = t.tx().gas - base_gas_required;
 
         // validate transaction nonce
-        if check_nonce && t.tx().nonce != nonce {
-            return Err(ExecutionError::InvalidNonce {
-                expected: nonce,
-                got: t.tx().nonce,
-            });
-        }
-
+        //     if check_nonce && t.tx().nonce != nonce {
+        //         return Err(ExecutionError::InvalidNonce {
+        //             expected: nonce,
+        //             got: t.tx().nonce,
+        //         });
+        //     }
         // validate if transaction fits into given block
         if self.info.gas_used + t.tx().gas > self.info.gas_limit {
             return Err(ExecutionError::BlockGasLimitReached {
@@ -1224,12 +1243,21 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         }
 
         // TODO: we might need bigints here, or at least check overflows.
-
+        sender = t.original_sender();
         // #[cfg(feature = "shard")]
         let balance = match t.as_unsigned() {
             TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.shard_data_list.get(&sender) {
-             Some(bal) => bal.clone(),
-                None => self.state.balance(&sender)?,
+             Some(bal) => {
+                 let temp_val = self.state.global_hash_map_storage_at(&sender);
+                 if temp_val.1{
+                     temp_val.0
+                         } else {
+                     bal.clone()
+                 }
+                 },
+                None => {
+                    panic!("something is wrong, tx should have data");
+                    self.state.balance(&sender)?},
             },
             _ => self.state.balance(&sender)?,
         };
@@ -1255,14 +1283,14 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
         // NOTE: there can be no invalid transactions from this point.
         if !schedule.keep_unsigned_nonce || !t.is_unsigned() {
-            self.state.inc_nonce(&sender)?;
+                self.state.inc_nonce(&t.sender())?;
         }
         self.state.sub_balance(
             &sender,
             &U256::try_from(gas_cost_effective).expect("Total cost (value + gas_cost_effective) is lower than max allowed balance (U256); gas_cost has to fit U256; qed"),
             &mut substate.to_cleanup_mode(&schedule),
         )?;
-
+        let sender = t.original_sender();
         let (result, output) = match t.tx().action {
             Action::Create => {
                 let (new_address, code_hash) = contract_address(
@@ -1330,7 +1358,230 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             vm_tracer.drain(),
         )?)
     }
+    fn fake_transact_with_tracer<T, V>(
+        &'a mut self,
+        t: &SignedTransaction,
+        check_nonce: bool,
+        output_from_create: bool,
+        mut tracer: T,
+        mut vm_tracer: V,
+    ) -> Result<Executed<T::Output, V::Output>, ExecutionError>
+        where
+            T: Tracer,
+            V: VMTracer,
+    {
+        let schedule = self.schedule;
+        debug!(target: "txn", "inside fake_transact_with_tracer");
+        // check if particualar transaction type is enabled at this block number in schedule
+        match t.as_unsigned() {
+            // #[cfg(feature = "shard")]
+            TypedTransaction::ShardTransaction(_) => (), //shard transactions are always valid
+            TypedTransaction::AccessList(_) => {
+                if !schedule.eip2930 {
+                    return Err(ExecutionError::TransactionMalformed(
+                        "OptionalAccessList EIP-2930 or EIP-2929 not enabled".into(),
+                    ));
+                }
+            }
+            TypedTransaction::EIP1559Transaction(_) => {
+                if !schedule.eip1559 {
+                    return Err(ExecutionError::TransactionMalformed(
+                        "1559 type of transactions not enabled".into(),
+                    ));
+                }
+            }
+            TypedTransaction::Legacy(_) => (), //legacy transactions are allways valid
+        };
+        // #[cfg(feature = "shard")]
+        let mut sender = t.sender();
+        let nonce = self.state.nonce(&sender)?;
 
+        let mut base_gas_required = U256::from(t.tx().gas_required(&schedule));
+
+        let mut access_list = AccessList::new(schedule.eip2929);
+
+        if schedule.eip2929 {
+            access_list.insert_address(sender);
+            for (address, builtin) in self.machine.builtins() {
+                if builtin.is_active(self.info.number) {
+                    access_list.insert_address(*address);
+                }
+            }
+
+            if let Some(al) = t.access_list() {
+                for item in al.iter() {
+                    access_list.insert_address(item.0);
+                    base_gas_required += vm::schedule::EIP2930_ACCESS_LIST_ADDRESS_COST.into();
+                    for key in item.1.iter() {
+                        access_list.insert_storage_key(item.0, *key);
+                        base_gas_required +=
+                            vm::schedule::EIP2930_ACCESS_LIST_STORAGE_KEY_COST.into();
+                    }
+                }
+            }
+        }
+
+        if t.tx().gas < base_gas_required {
+            return Err(ExecutionError::NotEnoughBaseGas {
+                required: base_gas_required,
+                got: t.tx().gas,
+            });
+        }
+
+        if !t.is_unsigned()
+            && check_nonce
+            && schedule.kill_dust != CleanDustMode::Off
+            && !self.state.exists(&sender)?
+        {
+            return Err(ExecutionError::SenderMustExist);
+        }
+
+        let init_gas = t.tx().gas - base_gas_required;
+
+        // validate transaction nonce
+
+            // if check_nonce && t.tx().nonce != nonce {
+            //     return Err(ExecutionError::InvalidNonce {
+            //         expected: nonce,
+            //         got: t.tx().nonce,
+            //     });
+            // }
+        // validate if transaction fits into given block
+        if self.info.gas_used + t.tx().gas > self.info.gas_limit {
+            return Err(ExecutionError::BlockGasLimitReached {
+                gas_limit: self.info.gas_limit,
+                gas_used: self.info.gas_used,
+                gas: t.tx().gas,
+            });
+        }
+
+        // ensure that the user was willing to at least pay the base fee
+        if t.tx().gas_price < self.info.base_fee.unwrap_or_default() && !t.has_zero_gas_price() {
+            return Err(ExecutionError::GasPriceLowerThanBaseFee {
+                gas_price: t.tx().gas_price,
+                base_fee: self.info.base_fee.unwrap_or_default(),
+            });
+        }
+
+        // verify that transaction max_fee_per_gas is higher or equal to max_priority_fee_per_gas
+        if t.tx().gas_price < t.max_priority_fee_per_gas() {
+            return Err(ExecutionError::TransactionMalformed(
+                "maxPriorityFeePerGas higher than maxFeePerGas".into(),
+            ));
+        }
+
+        // TODO: we might need bigints here, or at least check overflows.
+
+        // #[cfg(feature = "shard")]
+        let balance = match t.as_unsigned() {
+            TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.shard_data_list.get(&sender) {
+                Some(bal) => bal.clone(),
+                None => self.state.balance(&sender)?,
+            },
+            _ => self.state.balance(&sender)?,
+        };
+        // #[cfg(not(feature = "shard"))]
+        // let balance = self.state.balance(&sender)?;
+        let gas_cost_effective = t
+            .tx()
+            .gas
+            .full_mul(t.effective_gas_price(self.info.base_fee));
+        let gas_cost_max = t.tx().gas.full_mul(t.tx().gas_price);
+        let needed_balance = U512::from(t.tx().value) + gas_cost_max;
+
+        // avoid unaffordable transactions
+        let balance512 = U512::from(balance);
+        if balance512 < needed_balance {
+            return Err(ExecutionError::NotEnoughCash {
+                required: needed_balance,
+                got: balance512,
+            });
+        }
+
+        let mut substate = Substate::from_access_list(&access_list);
+
+        // NOTE: there can be no invalid transactions from this point.
+        // if !schedule.keep_unsigned_nonce || !t.is_unsigned() {
+        //     // self.state.inc_nonce(&sender)?;
+        // }
+        self.state.sub_balance(
+            &sender,
+            &U256::try_from(gas_cost_effective).expect("Total cost (value + gas_cost_effective) is lower than max allowed balance (U256); gas_cost has to fit U256; qed"),
+            &mut substate.to_cleanup_mode(&schedule),
+        )?;
+        let sender = t.original_sender();
+        let (result, output) = match t.tx().action {
+            Action::Create => {
+                let (new_address, code_hash) = contract_address(
+                    self.machine.create_address_scheme(self.info.number),
+                    &sender,
+                    &nonce,
+                    &t.tx().data,
+                );
+                access_list.insert_address(new_address);
+                let params = ActionParams {
+                    code_address: new_address.clone(),
+                    code_hash: code_hash,
+                    address: new_address,
+                    sender: sender.clone(),
+                    origin: sender.clone(),
+                    gas: init_gas,
+                    gas_price: t.effective_gas_price(self.info.base_fee),
+                    value: ActionValue::Transfer(t.tx().value),
+                    code: Some(Arc::new(t.tx().data.clone())),
+                    data: None,
+                    call_type: CallType::None,
+                    params_type: vm::ParamsType::Embedded,
+                    access_list: access_list,
+                };
+                let res = self.create(params, &mut substate, &mut tracer, &mut vm_tracer);
+                let out = match &res {
+                    Ok(res) if output_from_create => res.return_data.to_vec(),
+                    _ => Vec::new(),
+                };
+                (res, out)
+            }
+            Action::Call(ref address) => {
+                access_list.insert_address(address.clone());
+                let params = ActionParams {
+                    code_address: address.clone(),
+                    address: address.clone(),
+                    sender: sender.clone(),
+                    origin: sender.clone(),
+                    gas: init_gas,
+                    gas_price: t.effective_gas_price(self.info.base_fee),
+                    value: ActionValue::Transfer(t.tx().value),
+                    code: self.state.code(address)?,
+                    code_hash: self.state.code_hash(address)?,
+                    data: Some(t.tx().data.clone()),
+                    call_type: CallType::Call,
+                    params_type: vm::ParamsType::Separate,
+                    access_list: access_list,
+                };
+                let res = self.call(params, &mut substate, &mut tracer, &mut vm_tracer);
+                let out = match &res {
+                    Ok(res) => res.return_data.to_vec(),
+                    _ => Vec::new(),
+                };
+                (res, out)
+            }
+        };
+        // if txn status changed from None to Some(false), increase the nonce.
+        if !schedule.keep_unsigned_nonce || !t.is_unsigned() {
+            if self.state.txn_complete_status()!= None{
+                    self.state.inc_nonce(&t.sender())?;
+            }
+        }
+        // finalize here!
+        Ok(self.finalize(
+            t,
+            substate,
+            result,
+            output,
+            tracer.drain(),
+            vm_tracer.drain(),
+        )?)
+    }
     /// Calls contract function with given contract params and stack depth.
     /// NOTE. It does not finalize the transaction (doesn't do refunds, nor suicides).
     /// Modifies the substate and the output.
@@ -1347,6 +1598,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         T: Tracer,
         V: VMTracer,
     {
+        debug!(target: "txn", "inside call_with_depth_stack");
         tracer.prepare_trace_call(
             &params,
             self.depth,
