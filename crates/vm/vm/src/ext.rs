@@ -226,6 +226,12 @@ pub trait Ext {
     fn txn_complete_status(&mut self) -> Option<bool>;
     ///pushes in the address vec
     fn push_address_txn_vec(&mut self, a: Address);
+    /// pushes in the temp sstore val
+    fn push_temp_sstore_val(&mut self, k: Address, code: Address, ah: H256, v: U256);
+    ///pushes in the temp sstore delta
+    fn push_temp_sstore_delta(&mut self, a: u64, s: String, sh: u64);
+    /// returns static flag
+    fn static_flag(&self) -> bool ;
     ///tells whether it is a create transaction
     fn is_create_txn(&self)->bool;
 }

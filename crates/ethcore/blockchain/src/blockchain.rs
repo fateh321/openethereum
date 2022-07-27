@@ -284,8 +284,12 @@ pub struct BlockChain {
     pub data_hash_map_global: RwLock<Vec<HashMap<Address, U256>>>,
     //this keeps track of the data at the beginning of each round. Key, val is pushed whenever SStore occurs and no key exists in hashmap
     pub data_hash_map_round_beginning: RwLock<HashMap<Address, U256>>,
+    // this keeps track of increment in the current round for balances only
+    pub incr_bal_round: RwLock<HashMap<Address,U256>>,
     // All the incomplete txn with next_shard equal to my shard gets collected here.
     pub incomplete_txn: RwLock<Vec<SignedTransaction>>,
+    // This consists of any pending transactions not included in the block
+    pub pending_incomplete_txn: RwLock<Vec<SignedTransaction>>,
 }
 
 impl BlockProvider for BlockChain {
@@ -679,7 +683,9 @@ impl BlockChain {
             shard_state_root: RwLock::new((H256::default(), 999u64)),
             data_hash_map_global: RwLock::new(Vec::new()),
             data_hash_map_round_beginning: RwLock::new(HashMap::new()),
+            incr_bal_round: RwLock::new(HashMap::new()),
             incomplete_txn: RwLock::new(Vec::new()),
+            pending_incomplete_txn: RwLock::new(Vec::new()),
         };
 
         // load best block

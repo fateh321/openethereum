@@ -1,16 +1,16 @@
 [parity]
 chain = "spec.json"
-base_path = "/home/oe/parity2"
+base_path = "/home/oe/parity3"
 [network]
-port = 30302
+port = 30303
 [rpc]
-port = 8542
+port = 8543
 apis = ["web3", "eth", "net", "personal", "parity", "parity_set", "traces", "rpc", "parity_accounts"]
 [websockets]
-port = 8452
+port = 8453
 [account]
 password = ["node.pwds"]
 [mining]
-engine_signer = "0x002e28950558fbede1a9675cb113f0bd20912019"
+engine_signer = "0x00a94ac799442fb13de8302026fd03068ba6a428"
 reseal_on_txs = "none"
 force_sealing = true

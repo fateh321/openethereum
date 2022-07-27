@@ -20,9 +20,24 @@ use std::time::Duration;
 use ethereum_types::{Address, BigEndianHash, H160, H256, U256};
 use std::str::FromStr;
 use keccak_hash::keccak;
+use csv::Writer;
 
 static mut SHARD: u64 = 0u64;
 static mut LASTCOMMITROUND: u64 = 999u64;
+static mut GENESISCOMMIT: u64 = 0u64;
+
+static mut SLOADCOUNT: u64 = 0u64;
+static mut SSTORECOUNT: u64 = 0u64;
+static mut BALREADCOUNT: u64 = 0u64;
+static mut BALWRITECOUNT: u64 = 0u64;
+
+static mut HOPCOUNT_1: u64 = 0u64;
+static mut HOPCOUNT_2: u64 = 0u64;
+static mut HOPCOUNT_3: u64 = 0u64;
+static mut HOPCOUNT_4: u64 = 0u64;
+static mut HOPCOUNT_5: u64 = 0u64;
+static mut HOPCOUNT_6: u64 = 0u64;
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AggProof{
     pub proof: String,
@@ -31,6 +46,83 @@ pub struct AggProof{
     pub balance: Vec<U256>,
 }
 impl AggProof{
+    // pub fn write(){
+    //
+    // }
+    pub fn incr_hop_count(hop:u64){
+        match hop {
+            x if x==1u64  => unsafe{HOPCOUNT_1 += 1u64;},
+            x if x==2u64  => unsafe{HOPCOUNT_2 += 1u64;},
+            x if x==3u64  => unsafe{HOPCOUNT_3 += 1u64;},
+            x if x==4u64  => unsafe{HOPCOUNT_4 += 1u64;},
+            x if x==5u64  => unsafe{HOPCOUNT_5 += 1u64;},
+            _  => unsafe{HOPCOUNT_6 += 1u64;},
+        }
+    }
+    pub fn get_hop_count(hop:u64)->u64{
+        match hop {
+            x if x==1u64  => unsafe{let o = HOPCOUNT_1;
+                o},
+            x if x==2u64  => unsafe{let o = HOPCOUNT_2;
+                o},
+            x if x==3u64  => unsafe{let o = HOPCOUNT_3;
+                o},
+            x if x==4u64  => unsafe{let o = HOPCOUNT_4;
+                o},
+            x if x==5u64  => unsafe{let o = HOPCOUNT_5;
+                o},
+            _ => unsafe{let o = HOPCOUNT_6;
+                o},
+        }
+    }
+    pub fn get_sload_count()->u64{
+        unsafe {
+            let o = SLOADCOUNT;
+            o }
+    }
+    pub fn incr_sload_count(delta: u64) {
+        unsafe{
+            let mut o = SLOADCOUNT;
+            o+= delta;
+            SLOADCOUNT = o;
+        }
+    }
+    pub fn get_sstore_count()->u64{
+        unsafe {
+            let o = SSTORECOUNT;
+            o }
+    }
+    pub fn incr_sstore_count(delta: u64) {
+        unsafe{
+            let mut o = SSTORECOUNT;
+            o+= delta;
+            SSTORECOUNT = o;
+        }
+    }
+    pub fn get_bal_read_count()->u64{
+        unsafe {
+            let o = BALREADCOUNT;
+            o }
+    }
+    pub fn incr_bal_read_count(delta: u64) {
+        unsafe{
+            let mut o = BALREADCOUNT;
+            o+= delta;
+            BALREADCOUNT = o;
+        }
+    }
+    pub fn get_bal_write_count()->u64{
+        unsafe {
+            let o = BALWRITECOUNT;
+            o }
+    }
+    pub fn incr_bal_write_count(delta: u64) {
+        unsafe{
+            let mut o = BALWRITECOUNT;
+            o+= delta;
+            BALWRITECOUNT = o;
+        }
+    }
     pub fn new() -> Self {
         AggProof{
             proof: String::new(),
@@ -63,11 +155,14 @@ impl AggProof{
     pub fn set_author_shard(address: Address) -> u64 {
         let _s1 = Address::from_str("00bd138abd70e2f00903268f3db08f2d25677c9e").unwrap();
         let _s2 = Address::from_str("00aa39d30f0d20ff03a22ccfc30b7efbfca597c2").unwrap();
+        let _s3 = Address::from_str("002e28950558fbede1a9675cb113f0bd20912019").unwrap();
         match address {
             x if x==_s1  => unsafe{SHARD = 0u64;
             0u64},
             x if x==_s2 => unsafe{SHARD = 1u64;
                 1u64},
+            x if x==_s3 => unsafe{SHARD = 2u64;
+                2u64},
             _ => unsafe{SHARD = 999u64; println!("panic!, shard not recognised");
                 999u64},
         }
@@ -77,7 +172,12 @@ impl AggProof{
             let o = SHARD;
         o }
     }
-
+    pub fn set_genesis_commit(status: u64) { unsafe{GENESISCOMMIT = status; } }
+    pub fn get_genesis_commit() -> u64 {
+        unsafe {
+            let o = GENESISCOMMIT;
+            o }
+    }
     pub fn set_last_commit_shard(round: u64){
         unsafe{LASTCOMMITROUND = round; }
     }
@@ -89,14 +189,18 @@ impl AggProof{
     }
 
     pub fn shard_count() -> u64 {
-        2u64
+        3u64
     }
+
+    pub fn block_data_count() -> u64 {16u64}
     pub fn author_shard(address: Address) -> u64 {
         let _s1 = Address::from_str("00bd138abd70e2f00903268f3db08f2d25677c9e").unwrap();
         let _s2 = Address::from_str("00aa39d30f0d20ff03a22ccfc30b7efbfca597c2").unwrap();
+        let _s3 = Address::from_str("002e28950558fbede1a9675cb113f0bd20912019").unwrap();
         match address {
            x if x==_s1  => 0u64,
             x if x==_s2 => 1u64,
+            x if x==_s3 => 2u64,
             _ => 999u64,
         }
 

@@ -33,7 +33,7 @@ use rlp::{Rlp, RlpStream};
 use rustc_hex::FromHex;
 use types::{header::Header, BlockNumber};
 use vm::{AccessList, ActionParams, ActionValue, CallType, EnvInfo, ParamsType};
-
+use hyperproofs::AggProof;
 use builtin::Builtin;
 use engines::{
     AuthorityRound, BasicAuthority, Clique, EthEngine, InstantSeal, InstantSealParams, NullEngine,
@@ -831,6 +831,11 @@ impl Spec {
             let mut t = factories.trie.create(db.as_hash_db_mut(), &mut root);
 
             for (address, account) in self.genesis_state.get().iter() {
+                if AggProof::get_genesis_commit() == 0u64 {
+                    println!("inserting address {} and val {:?}", address, account);
+                    AggProof::pushAddressDelta(address.to_low_u64_be().rem_euclid(2u64.pow(16)),account.balance().to_string(),address.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                    debug!(target:"txn", "increasing {} from address {} in shard {}", account.balance(), address , address.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                }
                 t.insert(address.as_bytes(), &account.rlp())?;
             }
         }

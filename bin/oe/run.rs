@@ -142,8 +142,21 @@ impl crate::local_store::NodeInfo for FullNodeInfo {
 ///
 /// On error, returns what to print on stderr.
 pub fn execute(cmd: RunCmd, logger: Arc<RotatingLogger>) -> Result<RunningClient, String> {
+    // #[cfg(feature = "shard")]
+    //here we will add initVc for shard
+    AggProof::init(0u64);
+    //shard is 0u64 because these addresses don't matter.
+    // AggProof::pushAddressDelta(u64::from_str_radix("0001",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
+    // AggProof::pushAddressDelta(u64::from_str_radix("0002",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
+    // AggProof::pushAddressDelta(u64::from_str_radix("0003",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
+    // AggProof::pushAddressDelta(u64::from_str_radix("0004",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
+    // AggProof::pushAddressDelta(u64::from_str_radix("F32E",16).unwrap().rem_euclid(2u64.pow(16)),String::from("10000000000000000000000"),Address::from_str("004ec07d2329997267Ec62b4166639513386F32E").unwrap().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+    // AggProof::pushAddressDelta(u64::from_str_radix("17A1",16).unwrap().rem_euclid(2u64.pow(16)),String::from("10000000000000000000000"),Address::from_str("93a88B7893FCDb130ab9209f63AB2e6854e617A1").unwrap().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+
     // load spec
     let spec = cmd.spec.spec(&cmd.dirs.cache)?;
+    // address delta have been pushed above
+    AggProof::set_genesis_commit(1u64);
 
     // load genesis hash
     let genesis_hash = spec.genesis_header().hash();
@@ -317,15 +330,7 @@ pub fn execute(cmd: RunCmd, logger: Arc<RotatingLogger>) -> Result<RunningClient
         }
     }
     // #[cfg(feature = "shard")]
-    //here we will add initVc for shard
-    AggProof::init(0u64);
-    //shard is 0u64 because these addresses don't matter.
-    AggProof::pushAddressDelta(u64::from_str_radix("0001",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
-    AggProof::pushAddressDelta(u64::from_str_radix("0002",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
-    AggProof::pushAddressDelta(u64::from_str_radix("0003",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
-    AggProof::pushAddressDelta(u64::from_str_radix("0004",16).unwrap().rem_euclid(2u64.pow(16)),String::from("1"),0u64);
-    AggProof::pushAddressDelta(u64::from_str_radix("F32E",16).unwrap().rem_euclid(2u64.pow(16)),String::from("10000000000000000000000"),Address::from_str("004ec07d2329997267Ec62b4166639513386F32E").unwrap().to_low_u64_be().rem_euclid(AggProof::shard_count()));
-    AggProof::pushAddressDelta(u64::from_str_radix("17A1",16).unwrap().rem_euclid(2u64.pow(16)),String::from("10000000000000000000000"),Address::from_str("93a88B7893FCDb130ab9209f63AB2e6854e617A1").unwrap().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+    // do commit and update tree here
     AggProof::set_author_shard(miner.authoring_params().author.clone());
     AggProof::commit(AggProof::get_shard(), 0u64);
     AggProof::updateTree(AggProof::get_shard());

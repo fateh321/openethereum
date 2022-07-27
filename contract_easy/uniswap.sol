@@ -11,9 +11,10 @@ contract uniswap {
         balances[msg.sender] = totalSupply_;
     }  
 
-    function dtransfer(address _contract, address receiver, uint numTokens) external returns (bool) {
-    balances[msg.sender] = balances[msg.sender]-(numTokens);
-    erc20(_contract).transfer(receiver, numTokens);
+    function dtransfer(address _contract1, address _contract2, address receiver, uint numTokens) external returns (bool) {
+  //  balances[msg.sender] = balances[msg.sender]-(numTokens);
+    erc20(_contract1).transfer(receiver, numTokens);
+    erc20(_contract2).transfer(receiver, numTokens);
     return true;
     }
     
@@ -36,12 +37,13 @@ contract erc20 {
     mapping(address => mapping (address => uint256)) allowed;
     
     uint256 totalSupply_;
-
+    address _owner ;
 
 
    constructor(uint256 total) public {  
     totalSupply_ = total;
     balances[msg.sender] = totalSupply_;
+    _owner = msg.sender;
     }  
 
     function totalSupply() public view returns (uint256) {
@@ -53,10 +55,10 @@ contract erc20 {
     }
 
     function transfer(address receiver, uint numTokens) public returns (bool) {
-        require(numTokens <= balances[msg.sender]);
-        balances[msg.sender] = balances[msg.sender]-(numTokens);
+        require(numTokens <= balances[_owner]);
+        balances[_owner] = balances[_owner]-(numTokens);
         balances[receiver] = balances[receiver]+(numTokens);
-        emit Transfer(msg.sender, receiver, numTokens);
+        emit Transfer(_owner, receiver, numTokens);
         return true;
     }
 

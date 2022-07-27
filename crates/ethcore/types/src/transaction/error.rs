@@ -98,6 +98,8 @@ pub enum Error {
     // #[cfg(feature = "shard")]
     /// Transaction sender's shard is different from Block producer
     SenderInvalidShard,
+    /// Block cannot aggregate more data elements
+    BlockDataLimitExceeded,
 
 }
 
@@ -162,7 +164,9 @@ impl fmt::Display for Error {
             }
             SenderIsNotEOA => "Transaction sender is not an EOA (see EIP-3607)".into(),
             // #[cfg(feature = "shard")]
-            SenderInvalidShard => "Transaction sender's shard is different from Block producer".into()
+            SenderInvalidShard => "Transaction sender's shard is different from Block producer".into(),
+
+            BlockDataLimitExceeded => "Block cannot aggregate more data elements".into()
         };
 
         f.write_fmt(format_args!("Transaction error ({})", msg))

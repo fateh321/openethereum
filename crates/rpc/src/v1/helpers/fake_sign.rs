@@ -77,6 +77,7 @@ pub fn sign_call(request: CallRequest) -> Result<SignedTransaction, Error> {
             shard: 999u64,
             next_shard:999u64,
             incomplete: 0u64,
+            hop_count:0u64,
             original_sender:from,
             shard_data_list:HashMap::new(),
             shard_proof_list:Vec::new(),

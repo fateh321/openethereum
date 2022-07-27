@@ -142,6 +142,7 @@ impl SpecType {
                 let file = fs::File::open(filename).map_err(|e| {
                     format!("Could not load specification file at {}: {}", filename, e)
                 })?;
+                println!("loading spec here 1");
                 Spec::load(params, file)
             }
         }

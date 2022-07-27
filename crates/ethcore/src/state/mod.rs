@@ -328,6 +328,9 @@ pub struct State<B> {
     // All the incomplete txn with next_shard equal to my shard gets collected here.
     incomplete_txn_vec: RefCell<Vec<SignedTransaction>>,
     address_txn_vec: RefCell<Vec<Address>>,
+    temp_sstore_val: RefCell<Vec<(Address, Address, H256, U256)>>,
+    temp_sstore_delta: RefCell<Vec<(u64, String, u64)>>,
+    incr_bal_round: RefCell<HashMap<Address,U256>>,
     next_shard: RefCell<u64>,
     complete: RefCell<Option<bool>>,
     mined: RefCell<Option<bool>>,
@@ -408,6 +411,9 @@ impl<B: Backend> State<B> {
             data_hash_map_txn: RefCell::new(HashMap::new()),
             incomplete_txn_vec: RefCell::new(Vec::new()),
             address_txn_vec: RefCell::new(Vec::new()),
+            temp_sstore_val: RefCell::new(Vec::new()),
+            temp_sstore_delta: RefCell::new(Vec::new()),
+            incr_bal_round: RefCell::new(HashMap::new()),
             next_shard: RefCell::new(999u64),
             complete: RefCell::new(None::<bool>),
             mined: RefCell::new(None::<bool>),
@@ -439,6 +445,9 @@ impl<B: Backend> State<B> {
             data_hash_map_txn: RefCell::new(HashMap::new()),
             incomplete_txn_vec: RefCell::new(Vec::new()),
             address_txn_vec: RefCell::new(Vec::new()),
+            temp_sstore_val: RefCell::new(Vec::new()),
+            temp_sstore_delta: RefCell::new(Vec::new()),
+            incr_bal_round: RefCell::new(HashMap::new()),
             next_shard: RefCell::new(999u64),
             complete: RefCell::new(None::<bool>),
             mined: RefCell::new(None::<bool>),
@@ -466,9 +475,29 @@ impl<B: Backend> State<B> {
     pub fn is_create_txn(&self)->bool{
         self.is_create_txn.borrow().clone()
     }
+    pub fn clear_incr_bal_round(&mut self) {self.incr_bal_round.get_mut().clear();}
+    pub fn push_incr_bal_round(&mut self, a: Address, v: U256){
+        self.incr_bal_round.borrow_mut().insert(a,v);
+    }
+    pub fn incr_bal_round_storage_at(&self, a:&Address)->(U256,bool){
+        match self.incr_bal_round.borrow().get(a){
+            Some(val) => (val.clone(), true),
+            None => (U256::zero(), false),
+        }
+    }
     pub fn clear_hash_map_cache(&mut self) {self.hash_map_cache.get_mut().clear();}
     pub fn clear_address_txn_vec(&mut self){
         self.address_txn_vec.get_mut().clear();
+    }
+    pub fn clear_temp_sstore_val(&mut self) {self.temp_sstore_val.get_mut().clear();}
+    pub fn clear_temp_sstore_delta(&mut self) {self.temp_sstore_delta.get_mut().clear();}
+    pub fn push_temp_sstore_val(&mut self, k:Address, code: Address, ah: H256, v: U256) {self.temp_sstore_val.borrow_mut().push((k, code,ah,v));}
+    pub fn get_temp_sstore_val(&self)-> Vec<(Address, Address, H256, U256)> {
+        self.temp_sstore_val.borrow().clone()
+    }
+    pub fn push_temp_sstore_delta(&mut self, a: u64, s: String, sh: u64) {self.temp_sstore_delta.borrow_mut().push((a,s,sh));}
+    pub fn get_temp_sstore_delta(&self) -> Vec<(u64, String,u64)> {
+        self.temp_sstore_delta.borrow().clone()
     }
     pub fn push_address_txn_vec(&mut self, a:Address){
         self.address_txn_vec.borrow_mut().push(a);
@@ -487,6 +516,9 @@ impl<B: Backend> State<B> {
     }
     pub fn set_hash_map_round_beginning(&mut self, h: HashMap<Address, U256>){
         self.data_hash_map_round_beginning = RefCell::new(h);
+    }
+    pub fn set_incr_bal_round(&mut self, h: HashMap<Address, U256>){
+        self.incr_bal_round = RefCell::new(h);
     }
     pub fn hash_map_cache_storage_at(& self, key:&Address) -> (U256, bool) {
         match self.hash_map_cache.borrow().get(key){
@@ -509,6 +541,9 @@ impl<B: Backend> State<B> {
     pub fn export_data_hashmap_round_beginning(&self)->HashMap<Address, U256>{
         self.data_hash_map_round_beginning.borrow().clone()
     }
+    pub fn export_incr_bal_round(&self)->HashMap<Address, U256>{
+        self.incr_bal_round.borrow().clone()
+    }
     pub fn export_incomplete_txn(&self)->Vec<SignedTransaction>{
         self.incomplete_txn_vec.borrow().clone()
     }
@@ -527,6 +562,17 @@ impl<B: Backend> State<B> {
             }
         }
     val
+    }
+    pub fn global_hash_map_storage_at_one_round(&self, key:&Address) -> (U256, bool) {
+        let len = self.data_hash_map_global.borrow().len();
+        let mut val = (U256::zero(), false);
+        if len > 0 {
+            match self.data_hash_map_global.borrow()[len - 1].get(key) {
+                Some(v) => { val = (v.clone(), true); },
+                None => {},
+            }
+        }
+        val
     }
     pub fn hash_map_beginning_storage_at(&self, key:&Address) -> (U256, bool) {
         match self.data_hash_map_round_beginning.borrow().get(key){
@@ -980,9 +1026,13 @@ impl<B: Backend> State<B> {
         cleanup_mode: CleanupMode,
     ) -> TrieResult<()> {
         if a.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+            if !self.hash_map_beginning_storage_at(a).1 {
+                self.hash_map_beginning_insert(a.clone(), self.balance(&a).unwrap());
+            }
             trace!(target: "state", "add_balance({}, {}): {}", a, incr, self.balance(a)?);
             let is_value_transfer = !incr.is_zero();
             if is_value_transfer || (cleanup_mode == CleanupMode::ForceCreate && !self.exists(a)?) {
+                AggProof::incr_bal_write_count(1u64);
                 self.require(a, false)?.add_balance(incr);
             } else if let CleanupMode::TrackTouched(set) = cleanup_mode {
                 if self.exists(a)? {
@@ -995,24 +1045,24 @@ impl<B: Backend> State<B> {
         debug!(target:"txn", "increasing {} from address {} in shard {}", incr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
         if !incr.is_zero() {
             println!("increasing {} from address {} in shard {}", incr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
-            let mut balance = self.data_hash_map_txn_storage_at(a);
-            if balance.1 {
-                let temp_val = self.global_hash_map_storage_at(a);
-                if temp_val.1 {
-                    balance = temp_val;
-                }
-            } else {
-                if self.data_hash_map_global.borrow().len() > 0 {
-                    println!("the balance should exist");
-                }
-            }
-            let new_bal = balance.0.saturating_add(incr.clone());
-            if self.data_hash_map_global.borrow().len() > 0 {
-                self.global_hash_map_insert(a.clone(), new_bal);
-                if !self.hash_map_beginning_storage_at(a).1 {
-                    self.hash_map_beginning_insert(a.clone(), balance.0);
-                }
-            }
+            // let mut balance = self.data_hash_map_txn_storage_at(a);
+            // if balance.1 {
+            //     let temp_val = self.global_hash_map_storage_at(a);
+            //     if temp_val.1 {
+            //         balance = temp_val;
+            //     }
+            // } else {
+            //     if self.data_hash_map_global.borrow().len() > 0 {
+            //         println!("the balance should exist");
+            //     }
+            // }
+            // let new_bal = balance.0.saturating_add(incr.clone());
+            // if self.data_hash_map_global.borrow().len() > 0 {
+            //     self.global_hash_map_insert(a.clone(), new_bal);
+            // }
+            let mut increment = self.incr_bal_round_storage_at(a);
+            let incr_val = increment.0.saturating_add(incr.clone());
+            self.push_incr_bal_round(a.clone(), incr_val);
         }
         Ok(())
     }
@@ -1027,6 +1077,7 @@ impl<B: Backend> State<B> {
         if a.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
             trace!(target: "state", "sub_balance({}, {}): {}", a, decr, self.balance(a)?);
             if !decr.is_zero() || !self.exists(a)? {
+                AggProof::incr_bal_write_count(1u64);
                 self.require(a, false)?.sub_balance(decr);
             }
             if let CleanupMode::TrackTouched(ref mut set) = *cleanup_mode {
@@ -1043,7 +1094,7 @@ impl<B: Backend> State<B> {
             println!("decreasing {} from address {} in shard {}", decr, a , a.to_low_u64_be().rem_euclid(AggProof::shard_count()));
             let mut balance = self.data_hash_map_txn_storage_at(a);
             if balance.1 {
-                let temp_val = self.global_hash_map_storage_at(a);
+                let temp_val = self.global_hash_map_storage_at_one_round(a);
                 if temp_val.1 {
                     balance = temp_val;
                 }
@@ -1862,6 +1913,9 @@ impl Clone for State<StateDB> {
         let data_hash_map_txn = self.data_hash_map_txn.borrow().clone();
         let incomplete_txn_vec = self.incomplete_txn_vec.borrow().clone();
         let address_txn_vec = self.address_txn_vec.borrow().clone();
+        let temp_sstore_val = self.temp_sstore_val.borrow().clone();
+        let temp_sstore_delta = self.temp_sstore_delta.borrow().clone();
+        let incr_bal_round = self.incr_bal_round.borrow().clone();
         // let data_hash_map_global = {
         //     let mut data_hash_map_global: Vec<HashMap<Address, U256>> = Vec::new();
         //     for hashmap in self.data_hash_map_global.borrow().iter(){
@@ -1893,6 +1947,9 @@ impl Clone for State<StateDB> {
             data_hash_map_txn: RefCell::new(data_hash_map_txn),
             incomplete_txn_vec: RefCell::new(incomplete_txn_vec),
             address_txn_vec: RefCell::new(address_txn_vec),
+            temp_sstore_val: RefCell::new(temp_sstore_val),
+            temp_sstore_delta: RefCell::new(temp_sstore_delta),
+            incr_bal_round: RefCell::new(incr_bal_round),
             next_shard: self.next_shard.clone(),
             complete: self.complete.clone(),
             mined: self.mined.clone(),

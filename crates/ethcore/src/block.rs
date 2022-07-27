@@ -51,6 +51,7 @@ use vm::{EnvInfo, LastHashes};
 use hash::keccak;
 use rlp::{encode_list, RlpStream};
 use hyperproofs::AggProof;
+use stats::prometheus::register_int_counter;
 use types::{
     header::{ExtendedHeader, Header},
     receipt::{TransactionOutcome, TypedReceipt},
@@ -334,6 +335,7 @@ impl<'x> OpenBlock<'x> {
         if self.block.transactions_set.contains(&t.hash()) {
             return Err(TransactionError::AlreadyImported.into());
         }
+        // let mut wtr = csv::Writer::from_writer();
         // #[cfg(feature = "shard")]
         //here we will verify the proof if any
         let data = t.shard_proof_data();
@@ -353,6 +355,7 @@ impl<'x> OpenBlock<'x> {
         let sender = t.original_sender();
         // debug!(target: "miner", "transaction looks like {:?}", t);
         let mut t= if !t.contains_balance(){
+            AggProof::incr_bal_read_count(1u64);
             let mut balance = self.state.balance(&sender)?;
             let mut begin_round_balance = self.state.hash_map_beginning_storage_at(&sender);
             if begin_round_balance.1 {
@@ -376,6 +379,8 @@ impl<'x> OpenBlock<'x> {
             self.block.state.set_is_create_txn(false);
         }
         let mut outcome = self.block.state.default_apply_result().unwrap();
+        self.block.state.clear_temp_sstore_val();
+        self.block.state.clear_temp_sstore_delta();
         match self.block.state.get_mined_status(){
             Some(true) => {
                 if !t.tx().data.is_empty(){
@@ -408,16 +413,16 @@ impl<'x> OpenBlock<'x> {
                                 self.block.traces.is_enabled(),
                             )?;
                             if self.block.state.txn_complete_status() == None {
-                                debug!(target: "txn", "complete txn, shard state.apply() from miner again with Some(true)");
+                                debug!(target: "txn", "complete txn succesfully executed");
                                 //clear cache
-                                self.block.state.clear_hash_map_cache();
-                                self.block.state.set_txn_status(Some(true));
-                                outcome = self.block.state.apply(
-                                    &env_info,
-                                    self.engine.machine(),
-                                    &t,
-                                    self.block.traces.is_enabled(),
-                                )?;
+                                // self.block.state.clear_hash_map_cache();
+                                // self.block.state.set_txn_status(Some(true));
+                                // outcome = self.block.state.apply(
+                                //     &env_info,
+                                //     self.engine.machine(),
+                                //     &t,
+                                //     self.block.traces.is_enabled(),
+                                // )?;
                                 t.hash_map_replace_with(self.block.state.data_hashmap_txn());
                             } else {
                                 debug!(target: "txn", "complete txn from miner set to incomplete");
@@ -443,16 +448,16 @@ impl<'x> OpenBlock<'x> {
                             self.block.traces.is_enabled(),
                         )?;
                         if self.block.state.txn_complete_status() == None {
-                            debug!(target: "txn", "incomplete txn from miner state.apply() with Some(true) flag");
-                            self.block.state.set_txn_status(Some(true));
+                            debug!(target: "txn", "incomplete txn from miner successfully executed");
+                            // self.block.state.set_txn_status(Some(true));
                             //clear cache
-                            self.block.state.clear_hash_map_cache();
-                            outcome = self.block.state.apply(
-                                &env_info,
-                                self.engine.machine(),
-                                &t,
-                                self.block.traces.is_enabled(),
-                            )?;
+                            // self.block.state.clear_hash_map_cache();
+                            // outcome = self.block.state.apply(
+                            //     &env_info,
+                            //     self.engine.machine(),
+                            //     &t,
+                            //     self.block.traces.is_enabled(),
+                            // )?;
                             t.set_incomplete(0u64);
                             t.hash_map_replace_with(self.block.state.data_hashmap_txn());
                         } else {
@@ -548,6 +553,9 @@ impl<'x> OpenBlock<'x> {
         //         }
         //     }
         // }
+        if !t.is_incomplete(){
+            AggProof::incr_hop_count(t.get_hop_count()+1);
+        }
         self.block
             .transactions_set
             .insert(h.unwrap_or_else(|| t.hash()));
@@ -676,6 +684,9 @@ impl<'x> OpenBlock<'x> {
 
     pub fn set_hash_map_round_beginning(&mut self, h: HashMap<Address,U256>){
         self.block.state.set_hash_map_round_beginning(h);
+    }
+    pub fn set_incr_bal_round(&mut self, h: HashMap<Address,U256>){
+        self.block.state.set_incr_bal_round(h);
     }
     #[cfg(test)]
     /// Return mutable block reference. To be used in tests only.
@@ -821,11 +832,15 @@ pub(crate) fn enact(
     factories: Factories,
     hash_map_global: Vec<HashMap<Address, U256>>,
     hash_map_round_beginning: HashMap<Address,U256>,
+    incr_bal_round: HashMap<Address,U256>,
+    state_root: H256,
     is_epoch_begin: bool,
     ancestry: &mut dyn Iterator<Item = ExtendedHeader>,
 ) -> Result<LockedBlock, Error> {
     // For trace log
+    debug!(target: "txn", "^^^^^^^^^^^^entering trace_state 2^^^^^^^^^^");
     let trace_state = if log_enabled!(target: "enact", ::log::Level::Trace) {
+
         Some(State::from_existing(
             db.boxed_clone(),
             parent.state_root().clone(),
@@ -833,11 +848,12 @@ pub(crate) fn enact(
             factories.clone(),
         )?)
     } else {
+        debug!(target: "txn", "^^^^^^^^^^^^entering trace_state 3^^^^^^^^^^");
         None
     };
 
     // t_nb 8.1 Created new OpenBlock
-    let mut b = OpenBlock::new(
+    let mut b = OpenBlock::new_shard(
         engine,
         factories,
         tracing,
@@ -851,6 +867,7 @@ pub(crate) fn enact(
         vec![],
         is_epoch_begin,
         ancestry,
+        state_root,
     )?;
 
     if let Some(ref s) = trace_state {
@@ -874,6 +891,7 @@ pub(crate) fn enact(
     // set the hash_maps (global and beginning round)
     b.block.state.set_hash_map_global(hash_map_global);
     b.block.state.set_hash_map_round_beginning(hash_map_round_beginning);
+    b.block.state.set_incr_bal_round(incr_bal_round);
     // t_nb 8.2 transfer all field from current header to OpenBlock header that we created
     b.populate_from(&header);
     // t_nb 8.3 execute transactions one by one
@@ -900,6 +918,8 @@ pub fn enact_verified(
     // #[cfg(feature = "shard")]
     hash_map_global: Vec<HashMap<Address,U256>>,
     hash_map_round_beginning: HashMap<Address, U256>,
+    incr_bal_round: HashMap<Address,U256>,
+    state_root : H256,
     is_epoch_begin: bool,
     ancestry: &mut dyn Iterator<Item = ExtendedHeader>,
 ) -> Result<LockedBlock, Error> {
@@ -915,6 +935,8 @@ pub fn enact_verified(
         factories,
         hash_map_global,
         hash_map_round_beginning,
+        incr_bal_round,
+        state_root,
         is_epoch_begin,
         ancestry,
     )

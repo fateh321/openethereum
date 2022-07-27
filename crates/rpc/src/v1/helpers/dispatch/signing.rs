@@ -107,6 +107,7 @@ impl super::Accounts for Signer {
                 shard: 999u64,
                 next_shard:999u64,
                 incomplete: 0u64,
+                hop_count: 0u64,
                 original_sender: Address::zero(),
                 shard_data_list: HashMap::new(),
                 shard_proof_list: Vec::new(),

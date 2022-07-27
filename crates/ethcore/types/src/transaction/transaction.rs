@@ -516,6 +516,7 @@ pub struct ShardTransactionTx {
     pub shard : u64,
     pub next_shard: u64,
     pub incomplete: u64,
+    pub hop_count: u64,
     pub original_sender: Address,
     pub shard_data_list: ShardDataList,
     //only if there is a non-empty proof
@@ -526,13 +527,14 @@ pub struct ShardTransactionTx {
 }
 // #[cfg(feature = "shard")]
 impl ShardTransactionTx {
-    pub fn new(transaction: Transaction, shard: u64, next_shard: u64, incomplete: u64, original_sender:Address, shard_data_list: ShardDataList, shard_proof_list:ShardProofList, shard_proof:String) -> ShardTransactionTx {
+    pub fn new(transaction: Transaction, shard: u64, next_shard: u64, incomplete: u64, hop_count: u64, original_sender:Address, shard_data_list: ShardDataList, shard_proof_list:ShardProofList, shard_proof:String) -> ShardTransactionTx {
         ShardTransactionTx {
             transaction,
             shard,
             next_shard,
             original_sender,
             incomplete,
+            hop_count,
             shard_data_list,
             shard_proof_list,
             shard_proof,
@@ -551,12 +553,12 @@ impl ShardTransactionTx {
     }
 
     //EIP1559 inspired decoding but difficult to generate dummy transactions from web3js
-    // rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, shard, next_shard,incomplete, original_sender, shard_data_item list, shard_proof_list, shard_proof, senderV, senderR, senderS]])
+    // rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, shard, next_shard,incomplete, hop_count, original_sender, shard_data_item list, shard_proof_list, shard_proof, senderV, senderR, senderS]])
     pub fn decode(tx: &[u8]) -> Result<UnverifiedTransaction, DecoderError> {
         let tx_rlp = &Rlp::new(tx);
 
-        // we need to have 17 items in this list
-        if tx_rlp.item_count()? != 17{
+        // we need to have 18 items in this list
+        if tx_rlp.item_count()? != 18{
             // println!("item count is {:?}",tx_rlp.item_count());
             return Err(DecoderError::RlpIncorrectListLen);
         }
@@ -580,10 +582,12 @@ impl ShardTransactionTx {
         let next_shard_val = tx_rlp.val_at(8)?;
         // attaching incomplete status
         let incomplete_val = tx_rlp.val_at(9)?;
+        //attaching hop_count
+        let hop_count_val = tx_rlp.val_at(10)?;
         // attaching original_sender
-        let original_sender_val = tx_rlp.val_at(10)?;
+        let original_sender_val = tx_rlp.val_at(11)?;
         // shard data list we get from here
-        let datal_rlp = tx_rlp.at(11)?;
+        let datal_rlp = tx_rlp.at(12)?;
 
         // shard_data_list pattern: [[{20 bytes}, {32 bytes}]...]
         let mut datal: ShardDataList = HashMap::new();
@@ -598,7 +602,7 @@ impl ShardTransactionTx {
             datal.insert(datas.val_at(0)?, datas.val_at(1)?,);
         }
         // shard proof list we get from here
-        let proofl_rlp = tx_rlp.at(12)?;
+        let proofl_rlp = tx_rlp.at(13)?;
 
         // shard_proof_list pattern: [[{20 bytes}, {32 bytes}]...]
         let mut proofl: ShardProofList = Vec::new();
@@ -612,12 +616,12 @@ impl ShardTransactionTx {
             }
             proofl.push((datas.val_at(0)?, datas.val_at(1)?));
         }
-        let proof = tx_rlp.val_at(13)?;
+        let proof = tx_rlp.val_at(14)?;
         // we get signature part from here
         let signature = SignatureComponents {
-            standard_v: tx_rlp.val_at(14)?,
-            r: tx_rlp.val_at(15)?,
-            s: tx_rlp.val_at(16)?,
+            standard_v: tx_rlp.val_at(15)?,
+            r: tx_rlp.val_at(16)?,
+            s: tx_rlp.val_at(17)?,
         };
 
 
@@ -628,6 +632,7 @@ impl ShardTransactionTx {
                 shard: shard_val,
                 next_shard: next_shard_val,
                 incomplete: incomplete_val,
+                hop_count: hop_count_val,
                 original_sender:original_sender_val,
                 shard_data_list: datal,
                 shard_proof_list: proofl,
@@ -687,11 +692,11 @@ impl ShardTransactionTx {
         let mut stream = RlpStream::new();
 
         let list_size = if signature.is_some() {
-            14
+            18
         } else {
-            11
+            15
         };
-        // rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, shard, next_shard, incomplete, original_sender, shard_data_item list, shard_proof_list, shard_proof, senderV, senderR, senderS]])
+        // rlp([3, [chainId, nonce, maxFeePerGas(gasPrice), gasLimit, to, value, data, shard, next_shard, incomplete, hop_count, original_sender, shard_data_item list, shard_proof_list, shard_proof, senderV, senderR, senderS]])
         stream.begin_list(list_size);
 
         // append chain_id. from EIP-2930: chainId is defined to be an integer of arbitrary size.
@@ -711,6 +716,8 @@ impl ShardTransactionTx {
         stream.append(&self.next_shard);
         //attach incomplete status
         stream.append(&self.incomplete);
+        //attach hop_count
+        stream.append(&self.hop_count);
         // attach original sender
         stream.append(&self.original_sender);
         // shard data list
@@ -805,6 +812,13 @@ impl TypedTransaction {
             _ => {},
         }
     }
+    pub fn incr_hop_count(&mut self, delta:u64){
+        match self {
+            // #[cfg(feature = "shard")]
+            Self::ShardTransaction( tx) => {tx.hop_count = delta;},
+            _ => {},
+        }
+    }
     pub fn set_incomplete(&mut self, status:u64){
         match self {
             // #[cfg(feature = "shard")]
@@ -844,6 +858,7 @@ impl TypedTransaction {
                         shard: address.to_low_u64_be().rem_euclid(AggProof::shard_count()),
                         next_shard: 999u64,
                         incomplete: 0u64,
+                        hop_count:0u64,
                         original_sender: address,
                         shard_data_list: HashMap::new(),
                         shard_proof_list: Vec::new(),
@@ -1503,6 +1518,15 @@ impl SignedTransaction {
     pub fn set_next_shard(&mut self, shard:u64){
         self.transaction.unsigned.set_next_shard(shard);
     }
+    pub fn incr_hop_count(&mut self, delta:u64){
+        self.transaction.unsigned.incr_hop_count(delta);
+    }
+    pub fn get_hop_count(&self)->u64{
+        match &self.transaction.unsigned {
+            TypedTransaction::ShardTransaction(tx) => tx.hop_count,
+            _ => 0u64,
+        }
+    }
     pub fn is_incomplete(&self)->bool{
         match &self.transaction.unsigned {
             TypedTransaction::ShardTransaction(tx) => tx.incomplete!=0u64,
@@ -1770,6 +1794,7 @@ mod tests {
             },
             999u64,
             999u64,
+            0u64,
             0u64,
             Address::zero(),
             HashMap::from([(H160::default(),U256::zero()),]),

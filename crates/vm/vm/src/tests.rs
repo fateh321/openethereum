@@ -196,6 +196,15 @@ impl Ext for FakeExt {
 
     }
 
+    fn push_temp_sstore_val(&mut self, k: Address, code: Address, ah: H256, v: U256){
+
+    }
+    fn static_flag(&self) -> bool {
+        false
+    }
+    fn push_temp_sstore_delta(&mut self, a: u64, s: String, sh: u64){
+
+    }
     fn set_next_shard(&mut self, shard: u64){
 
     }

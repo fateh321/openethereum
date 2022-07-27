@@ -16,7 +16,7 @@
 
 //! Transaction Execution environment.
 use bytes::{Bytes, BytesRef};
-use ethereum_types::{Address, H256, U256, U512};
+use ethereum_types::{Address, H256, U256, U512,BigEndianHash};
 use evm::{CallType, FinalizationResult, Finalize};
 use executed::ExecutionError;
 pub use executed::{Executed, ExecutionResult};
@@ -33,6 +33,7 @@ use vm::{
     self, AccessList, ActionParams, ActionValue, CleanDustMode, CreateContractAddress, EnvInfo,
     ResumeCall, ResumeCreate, ReturnData, Schedule, TrapError,
 };
+use hyperproofs::AggProof;
 
 #[cfg(any(test, feature = "test-helpers"))]
 /// Precompile that can never be prunned from state trie (0x3, only in tests)
@@ -1248,18 +1249,20 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         let balance = match t.as_unsigned() {
             TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.shard_data_list.get(&sender) {
              Some(bal) => {
-                 let temp_val = self.state.global_hash_map_storage_at(&sender);
+                 let temp_val = self.state.global_hash_map_storage_at_one_round(&sender);
+                 let increment = self.state.incr_bal_round_storage_at(&sender);
                  if temp_val.1{
-                     temp_val.0
+                     if increment.1{temp_val.0.saturating_add(increment.0)} else { temp_val.0 }
                          } else {
-                     bal.clone()
+                    if increment.1{bal.clone().saturating_add(increment.0)}else { bal.clone() }
                  }
                  },
                 None => {
                     panic!("something is wrong, tx should have data");
                     self.state.balance(&sender)?},
             },
-            _ => self.state.balance(&sender)?,
+            _ => {AggProof::incr_bal_read_count(1u64);
+                self.state.balance(&sender)?},
         };
         // #[cfg(not(feature = "shard"))]
         // let balance = self.state.balance(&sender)?;
@@ -1473,12 +1476,15 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
         // TODO: we might need bigints here, or at least check overflows.
 
         // #[cfg(feature = "shard")]
+        let sender = t.original_sender();
         let balance = match t.as_unsigned() {
             TypedTransaction::ShardTransaction(shard_tx) => match shard_tx.shard_data_list.get(&sender) {
                 Some(bal) => bal.clone(),
-                None => self.state.balance(&sender)?,
+                None => { AggProof::incr_bal_read_count(1u64);
+                    self.state.balance(&sender)?},
             },
-            _ => self.state.balance(&sender)?,
+            _ => {AggProof::incr_bal_read_count(1u64);
+                self.state.balance(&sender)?},
         };
         // #[cfg(not(feature = "shard"))]
         // let balance = self.state.balance(&sender)?;
@@ -1510,6 +1516,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
             &mut substate.to_cleanup_mode(&schedule),
         )?;
         let sender = t.original_sender();
+        let mut code_address = Address::zero();
         let (result, output) = match t.tx().action {
             Action::Create => {
                 let (new_address, code_hash) = contract_address(
@@ -1542,6 +1549,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
                 (res, out)
             }
             Action::Call(ref address) => {
+                code_address = address.clone();
                 access_list.insert_address(address.clone());
                 let params = ActionParams {
                     code_address: address.clone(),
@@ -1566,10 +1574,30 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
                 (res, out)
             }
         };
-        // if txn status changed from None to Some(false), increase the nonce.
+        // no if, increase the nonce.
         if !schedule.keep_unsigned_nonce || !t.is_unsigned() {
-            if self.state.txn_complete_status()!= None{
+            // if self.state.txn_complete_status()!= None{
                     self.state.inc_nonce(&t.sender())?;
+            // }
+        }
+        // if the status doesn't change write the state
+        if self.state.txn_complete_status() == None {
+            let mut val_vec = self.state.get_temp_sstore_val();
+            let mut delta_vec = self.state.get_temp_sstore_delta();
+            assert_eq!(val_vec.len(), delta_vec.len());
+            for _i in 0..val_vec.len(){
+                let x = delta_vec.pop().unwrap();
+                let y = val_vec.pop().unwrap();
+                if y.1.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+                    self.state
+                        .set_storage(&y.1, y.2.clone(), BigEndianHash::from_uint(&y.3));
+                    AggProof::incr_sstore_count(1u64);
+                    println!("SSTORE setting storage at {} with val {} and code address {}", y.2, y.3, y.1);
+                }
+                self.state.global_hash_map_insert(y.0, y.3);
+                AggProof::pushAddressDelta(x.0.clone(), x.1.clone(),x.2.clone());
+                println!("delta {} from address {} in shard {}", x.1, x.0 , x.2);
+
             }
         }
         // finalize here!

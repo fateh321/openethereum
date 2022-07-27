@@ -60,6 +60,10 @@ where
 }
 
 impl PodAccount {
+
+    pub fn balance(&self) -> U256{
+        self.balance.clone()
+    }
     /// Convert Account to a PodAccount.
     /// NOTE: This will silently fail unless the account is fully cached.
     pub fn from_account(acc: &Account) -> PodAccount {

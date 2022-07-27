@@ -549,6 +549,7 @@ impl Importer {
         if block_number.rem_euclid(AggProof::shard_count()) ==0{
             let chain_wr = client.chain.write();
             chain_wr.data_hash_map_round_beginning.write().clear();
+            chain_wr.incr_bal_round.write().clear();
             let mut _h = chain_wr.data_hash_map_global.write();
             if _h.len() == 5{
                 _h.remove(0);
@@ -559,8 +560,10 @@ impl Importer {
 
         }
         // t_nb 8.0 Block enacting. Execution of transactions.
+        debug!(target: "txn", "^^^^^^^^^^^^entering trace_state 0^^^^^^^^^^");
         let enact_result = {
             let chain = client.chain.read();
+            let sr = chain.shard_state_root.read().clone();
            let x =  enact_verified(
                 block,
                 engine,
@@ -571,12 +574,14 @@ impl Importer {
                 client.factories.clone(),
                 chain.data_hash_map_global.read().clone(),
                 chain.data_hash_map_round_beginning.read().clone(),
+                chain.incr_bal_round.read().clone(),
+                if parent.number() == sr.1{ sr.0} else { parent.state_root().clone() },
                 is_epoch_begin,
                 &mut chain.ancestry_with_metadata_iter(*header.parent_hash()),
             );
             x
         };
-
+        debug!(target: "txn", "^^^^^^^^^^^^entering trace_state 1^^^^^^^^^^");
         let mut locked_block = match enact_result {
             Ok(b) => b,
             Err(e) => {
@@ -590,15 +595,20 @@ impl Importer {
             let mut chain_wr = client.chain.write();
             let mut h_global = chain_wr.data_hash_map_global.write();
             let mut h_round_beginning = chain_wr.data_hash_map_round_beginning.write();
+            let mut i_bal_round = chain_wr.incr_bal_round.write();
             let mut incomplete_txn = chain_wr.incomplete_txn.write();
             let hashmap_global = locked_block.state.export_data_hashmap_global();
             let hashmap_round_beginning = locked_block.state.export_data_hashmap_round_beginning();
+            let incr_bal_round = locked_block.state.export_incr_bal_round();
             let i_txn = locked_block.state.export_incomplete_txn();
             {
                 *h_global = hashmap_global;
             }
             {
                 *h_round_beginning = hashmap_round_beginning;
+            }
+            {
+                *i_bal_round = incr_bal_round;
             }
             {   // we push transactions permanently to blockchain
                 for i_t in i_txn {
@@ -3103,6 +3113,7 @@ impl PrepareOpenBlock for Client {
         // set the global and round_beginning hashmaps
         open_block.set_hash_map_global(chain.data_hash_map_global.read().clone());
         open_block.set_hash_map_round_beginning(chain.data_hash_map_round_beginning.read().clone());
+        open_block.set_incr_bal_round(chain.incr_bal_round.read().clone());
         // Add uncles
         chain
             .find_uncle_headers(&h, MAX_UNCLE_AGE)
@@ -3126,10 +3137,14 @@ impl PrepareOpenBlock for Client {
 
         Ok(open_block)
     }
-    fn import_hash_map_in_chain(&self, hash_map_global: Vec<HashMap<Address, U256>>, hash_map_round_beginning: HashMap<Address, U256>) {
+    fn import_hash_map_in_chain(&self, hash_map_global: Vec<HashMap<Address, U256>>, hash_map_round_beginning: HashMap<Address, U256>, incr_bal_round: HashMap<Address,U256>) {
         let mut chain = self.chain.write();
         let mut h_global = chain.data_hash_map_global.write();
         let mut h_round_beginning = chain.data_hash_map_round_beginning.write();
+        let mut i_bal_round = chain.incr_bal_round.write();
+        {
+            *i_bal_round = incr_bal_round;
+        }
         {
             *h_global = hash_map_global;
         }
@@ -3147,6 +3162,21 @@ impl PrepareOpenBlock for Client {
             self.chain.write().incomplete_txn.write().clear();
         }
     }
+    fn clear_pending_incomplete_txn(&self) {
+        {
+            self.chain.write().pending_incomplete_txn.write().clear();
+        }
+    }
+    fn push_pending_incomplete_txn(&self, t: SignedTransaction) {
+        {
+            self.chain.write().pending_incomplete_txn.write().push(t);
+        }
+    }
+    fn get_pending_incomplete_txn(&self)->Vec<SignedTransaction> {
+        {
+            self.chain.read().pending_incomplete_txn.read().clone()
+        }
+    }
     fn clear_data_hash_map_global(&self) {
         {
             self.chain.write().data_hash_map_global.write().clear();
@@ -3155,6 +3185,10 @@ impl PrepareOpenBlock for Client {
     fn clear_data_hash_map_round_beginning(&self) {
             let mut chain = self.chain.write();
             chain.data_hash_map_round_beginning.write().clear();
+    }
+    fn clear_incr_bal_round(&self) {
+        let mut chain = self.chain.write();
+        chain.incr_bal_round.write().clear();
     }
     fn resize_hash_map_global(&self) {
             let mut chain = self.chain.write();

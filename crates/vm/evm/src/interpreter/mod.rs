@@ -709,6 +709,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                 // clear return data buffer before creating new call frame.
                 self.return_data = ReturnData::empty();
                 // no shard here coz create happens in all shards
+                AggProof::incr_bal_read_count(1u64);
                 let can_create = ext.balance(&self.params.address)? >= endowment
                     && ext.depth() < ext.schedule().max_depth;
                 if !can_create {
@@ -802,6 +803,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                         if ext.is_static() && value.map_or(false, |v| !v.is_zero()) {
                             return Err(vm::Error::MutableCallInStaticContext);
                         }
+                        AggProof::incr_bal_read_count(1u64);
                         let has_balance = ext.balance(&self.params.address)?
                             >= value.expect("value set for all but delegate call; qed");
                         (
@@ -812,6 +814,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                         )
                     }
                     instructions::CALLCODE => {
+                        AggProof::incr_bal_read_count(1u64);
                         let has_balance = ext.balance(&self.params.address)?
                             >= value.expect("value set for all but delegate call; qed");
                         (
@@ -1012,6 +1015,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                     let key = BigEndianHash::from_uint(&self.stack.pop_back());
                     let key_shard = AggProof::concat_hash(ext.origin_address(), key);
                     let word = ext.storage_at(&key)?.into_uint();
+                    AggProof::incr_sload_count(1u64);
                     println!("SLOAD (CREATE) fetching storage at {}", key);
                     self.stack.push(word);
 
@@ -1029,6 +1033,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
                     } else {
                         if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+                            AggProof::incr_sload_count(1u64);
                             let word_temp = ext.storage_at(&key)?.into_uint();
                             let mut begin_round_word = ext.hash_map_beginning_storage_at(&key_shard);
                             if begin_round_word.1 {
@@ -1060,6 +1065,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                     // #[cfg(feature = "shard")]
                     let key_shard = AggProof::concat_hash(ext.origin_address(), key);
                     //word is the current val
+                    AggProof::incr_sload_count(1u64);
                     let word = ext.storage_at(&key)?.into_uint();
                     let mut delta = val.checked_sub(word);
                     let delta_string:String;
@@ -1072,6 +1078,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                     }else {
                         delta_string = delta.unwrap().to_string();
                     }
+                    AggProof::incr_sstore_count(1u64);
                     ext.set_storage(key, BigEndianHash::from_uint(&val))?;
                     println!("SSTORE setting storage at {} with val {}", key, val);
                     AggProof::pushAddressDelta(key_shard.to_low_u64_be().rem_euclid(2u64.pow(16)), delta_string.clone(), ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
@@ -1110,6 +1117,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                                 current_val.0
                             } else {
                                 if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard(){
+                                    AggProof::incr_sload_count(1u64);
                                     let word_temp = ext.storage_at(&key)?.into_uint();
                                     let mut begin_round_word = ext.hash_map_beginning_storage_at(&key_shard);
                                     if begin_round_word.1{
@@ -1152,19 +1160,21 @@ impl<Cost: CostType> Interpreter<Cost> {
                                     // use the previous fetched value
                                     ext.hash_map_beginning_insert(key_shard, word.clone());
                                 }
+                                AggProof::incr_sstore_count(1u64);
                                 ext.set_storage(key, BigEndianHash::from_uint(&val))?;
-                                println!("SSTORE setting storage at {} with val {} and code address", key, val);
+                                println!("SSTORE (Some(true)) setting storage at {} with val {} and code address", key, val);
                             }
                             AggProof::pushAddressDelta(key_shard.to_low_u64_be().rem_euclid(2u64.pow(16)), delta_string.clone(), ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
                             println!("delta {} from address {} in shard {}", delta_string, key_shard , ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
                         } else {
-                            ext.hash_map_cache_insert(key_shard, val.clone());
+
                             // should be able to retrieve the value
                             let current_val = ext.hash_map_storage_at(&key_shard);
-                            let _word = if current_val.1{
+                            let word = if current_val.1{
                                 current_val.0
                             } else {
                                 if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard(){
+                                    AggProof::incr_sload_count(1u64);
                                     let word_temp = ext.storage_at(&key)?.into_uint();
                                     let mut begin_round_word = ext.hash_map_beginning_storage_at(&key_shard);
                                     if begin_round_word.1{
@@ -1184,15 +1194,50 @@ impl<Cost: CostType> Interpreter<Cost> {
                                 }
 
                             };
+                            let mut delta = val.checked_sub(word);
+                            let delta_string:String;
+                            if delta == None{
+                                delta = word.checked_sub(val);
+                                let mut neg = String::from("-");
+                                let v = delta.unwrap().to_string();
+                                neg.push_str(&v);
+                                delta_string = neg.clone();
+                            }else {
+                                delta_string = delta.unwrap().to_string();
+                            }
+                            // uptil this part, we caculate delta. Only when it is a complete transaction.
+
+                            //***************************************************
+                            // ext.hash_map_cache_insert(key_shard, val.clone());
+                            // ext.hash_map_global_insert(key_shard, val.clone());
+                            ext.hash_map_cache_insert(key_shard, val.clone());
+                            if ext.static_flag(){
+                                return  Err(vm::Error::MutableCallInStaticContext)
+                            } else {
+                                ext.push_temp_sstore_val(key_shard, ext.origin_address(), key, val.clone());
+                                ext.push_temp_sstore_delta(key_shard.to_low_u64_be().rem_euclid(2u64.pow(16)), delta_string.clone(), ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                                if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+                                    if !ext.hash_map_beginning_storage_at(&key_shard).1{
+                                        // let current_val = ext.storage_at(&key)?.into_uint();
+                                        // ext.hash_map_beginning_insert(key_shard, current_val.clone());
+                                        // use the previous fetched value
+                                        ext.hash_map_beginning_insert(key_shard, word.clone());
+                                    }
+                                    // ext.set_storage(key, BigEndianHash::from_uint(&val))?;
+                                    // println!("SSTORE setting storage at {} with val {} and code address", key, val);
+                                }
+                            }
+
                         }
                         None => {
-                            ext.hash_map_cache_insert(key_shard, val.clone());
+                            // ext.hash_map_cache_insert(key_shard, val.clone());
                             // should be able to retrieve the value
                             let current_val = ext.hash_map_storage_at(&key_shard);
-                            let _word = if current_val.1{
+                            let word = if current_val.1{
                                 current_val.0
                             } else {
                                 if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard(){
+                                    AggProof::incr_sload_count(1u64);
                                     let word_temp = ext.storage_at(&key)?.into_uint();
                                     let mut begin_round_word = ext.hash_map_beginning_storage_at(&key_shard);
                                     if begin_round_word.1{
@@ -1211,7 +1256,42 @@ impl<Cost: CostType> Interpreter<Cost> {
 
                                 }
 
-                            };}
+                            };
+                            let mut delta = val.checked_sub(word);
+                            let delta_string:String;
+                            if delta == None{
+                                delta = word.checked_sub(val);
+                                let mut neg = String::from("-");
+                                let v = delta.unwrap().to_string();
+                                neg.push_str(&v);
+                                delta_string = neg.clone();
+                            }else {
+                                delta_string = delta.unwrap().to_string();
+                            }
+                            // uptil this part, we caculate delta. Only when it is a complete transaction.
+
+                            //***************************************************
+                            ext.hash_map_cache_insert(key_shard, val.clone());
+                            // ext.hash_map_global_insert(key_shard, val.clone());
+                            if ext.static_flag(){
+                               return  Err(vm::Error::MutableCallInStaticContext)
+                            } else {
+                                ext.push_temp_sstore_val(key_shard, ext.origin_address(),key, val.clone());
+                                ext.push_temp_sstore_delta(key_shard.to_low_u64_be().rem_euclid(2u64.pow(16)), delta_string.clone(), ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                                if ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard() {
+                                    if !ext.hash_map_beginning_storage_at(&key_shard).1{
+                                        // let current_val = ext.storage_at(&key)?.into_uint();
+                                        // ext.hash_map_beginning_insert(key_shard, current_val.clone());
+                                        // use the previous fetched value
+                                        ext.hash_map_beginning_insert(key_shard, word.clone());
+                                    }
+                                    // ext.set_storage(key, BigEndianHash::from_uint(&val))?;
+                                    // println!("SSTORE setting storage at {} with val {} and code address", key, val);
+                                }
+                            }
+
+
+                        }
                     }
                     ext.al_insert_storage_key(self.params.address, key);
                 }
@@ -1238,6 +1318,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                     val.0
                 } else {
                     if address.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard(){
+                        AggProof::incr_bal_read_count(1u64);
                         let balance_temp = ext.balance(&address)?;
                         let mut begin_round_word = ext.hash_map_beginning_storage_at(&address);
                         if begin_round_word.1{
@@ -1374,6 +1455,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                     val.0
                 } else {
                     if self.params.address.to_low_u64_be().rem_euclid(AggProof::shard_count()) == AggProof::get_shard(){
+                        AggProof::incr_bal_read_count(1u64);
                         let balance_temp = ext.balance(&self.params.address)?;
                         let mut begin_round_word = ext.hash_map_beginning_storage_at(&self.params.address);
                         if begin_round_word.1{

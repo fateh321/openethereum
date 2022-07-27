@@ -479,6 +479,7 @@ impl Miner {
                 //clear data_hash_map_round_beginning
                 debug!(target: "miner", "before clearing data hashmap");
                 chain.clear_data_hash_map_round_beginning();
+                chain.clear_incr_bal_round();
                 chain.resize_hash_map_global();
                 debug!(target: "miner", "after clearing data hashmap");
                 AggProof::commit(AggProof::get_shard(),0u64);
@@ -527,9 +528,22 @@ impl Miner {
                     debug!(target: "miner", "before exporting incomplete txn");
                     block.set_incomplete_txn(chain.export_incomplete_txn());
                     chain.clear_incomplete_txn();
+                    let mut pending_incomplete_txn = chain.get_pending_incomplete_txn();
+                    chain.clear_pending_incomplete_txn();
                     // Before adding from the queue to the new block, give the engine a chance to add transactions.
                     match self.engine.generate_engine_transactions(&block) {
-                        Ok(transactions) => (block, last_work_hash, transactions),
+                        Ok( transactions) => { let mut transactions = transactions;
+                            let mut verify_transaction = Vec::new();
+                            if transactions.len()>0{
+                                verify_transaction.push(transactions[0].clone());
+                                transactions.remove(0);
+                                verify_transaction.append(&mut pending_incomplete_txn);
+                                verify_transaction.append(&mut transactions);
+
+                            }
+                            // pending_incomplete_txn.append(&mut transactions);
+                            (block, last_work_hash, verify_transaction)
+                        },
                         Err(err) => {
                             error!(target: "miner", "Failed to prepare engine transactions for new block: {:?}. \
 								   This is likely an error in chain specification or on-chain consensus smart \
@@ -552,6 +566,7 @@ impl Miner {
 
         let mut tx_count = 0usize;
         let mut skipped_transactions = 0usize;
+        let mut proof_data_count = 0u64;
 
         let client = self.pool_client(chain);
         let engine_params = self.engine.params();
@@ -631,8 +646,8 @@ impl Miner {
             // debug!(target: "miner", "transaction looks like {:?}", transaction);
             //below should be original sender;
             let sender = transaction.original_sender();
-            let balance = open_block.state.balance(&sender).unwrap();
-            let shard_data = (sender.clone(),balance.clone());
+            // let balance = open_block.state.balance(&sender).unwrap();
+            // let shard_data = (sender.clone(),balance.clone());
             // #[cfg(feature = "shard")]
             // let params = self.params.read().clone();
             // let _block_shard = AggProof::author_shard(&params.author);
@@ -641,10 +656,14 @@ impl Miner {
             let _txn = transaction.clone();
             debug!(target: "txn", "pushing txn from miner");
             let result = match match_shard {
-              true =>   client
+              true =>  if (proof_data_count + 6u64) <= AggProof::block_data_count(){
+                  client
                       .verify_for_pending_block(&transaction, &open_block.header)
                       .map_err(| e | e.into())
-                      .and_then(| _ | open_block.push_transaction(transaction, None)),
+                      .and_then(| _ | open_block.push_transaction(transaction, None))
+              }else{
+                  Err(Error(ErrorKind::Transaction(transaction::Error::BlockDataLimitExceeded), Default::default()))
+              },
                   false => Err(Error(ErrorKind::Transaction(transaction::Error::SenderInvalidShard), Default::default())),
               };
 
@@ -668,6 +687,7 @@ impl Miner {
             }
 
             debug!(target: "miner", "Adding tx {:?} took {} ms", hash, took_ms(&took));
+            debug!(target: "txn", "result looks like {:?}", result);
             match result {
                 Err(Error(
                     ErrorKind::Execution(ExecutionError::BlockGasLimitReached {
@@ -714,6 +734,13 @@ impl Miner {
                     debug!(target: "txn", "Transaction sent to wrong shard {} txn is {:?}", block_shard, _txn);
                     // not_allowed_transactions.insert(hash);
                     }
+                Err(Error(ErrorKind::Transaction(transaction::Error::BlockDataLimitExceeded), _)) => {
+                    debug!(target: "txn", "Transaction can't be included, block limit exceed");
+                    if _txn.is_incomplete() {
+                        chain.push_pending_incomplete_txn(_txn);
+                    }
+                    // not_allowed_transactions.insert(hash);
+                }
                 Err(Error(ErrorKind::Transaction(transaction::Error::NotAllowed), _)) => {
                     not_allowed_transactions.insert(hash);
                     debug!(target: "miner", "Skipping non-allowed transaction for sender {:?}", hash);
@@ -733,6 +760,7 @@ impl Miner {
                       for _t in open_block.state.get_address_txn_vec(){
                           self.proof_data.write().push((_t,_h.get(&_t).unwrap().clone()));
                           AggProof::pushAddressCommit(_t.to_low_u64_be().rem_euclid(2u64.pow(16)),block_shard);
+                          proof_data_count += 1;
                       }
                       // self.proof_data.write().push(shard_data);
                       // AggProof::pushAddressCommit(shard_data.0.to_low_u64_be().rem_euclid(2u64.pow(16)),block_shard);
@@ -770,7 +798,7 @@ impl Miner {
             self.transaction_queue.penalize(senders_to_penalize.iter());
         }
         debug!(target: "miner", "before importing hashmaps");
-        chain.import_hash_map_in_chain(block.state.export_data_hashmap_global(), block.state.export_data_hashmap_round_beginning());
+        chain.import_hash_map_in_chain(block.state.export_data_hashmap_global(), block.state.export_data_hashmap_round_beginning(), block.state.export_incr_bal_round());
         debug!(target: "miner", "after importing hashmaps");
         Some((block, original_work_hash))
     }
@@ -1023,6 +1051,7 @@ impl Miner {
             // | NOTE Code below requires sealing locks.                                |
             // | Make sure to release the locks before calling that method.             |
             // --------------------------------------------------------------------------
+            debug!(target: "txn", "preparing pending block");
             match self.prepare_block(client) {
                 Some((block, original_work_hash)) => {
                     self.prepare_work(block, original_work_hash);

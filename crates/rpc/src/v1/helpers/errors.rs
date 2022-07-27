@@ -410,7 +410,8 @@ pub fn transaction_message(error: &TransactionError) -> String {
         TransactionTypeNotEnabled => format!("Transaction type is not enabled for current block"),
         SenderIsNotEOA => "Transaction sender is not an EOA (see EIP-3607)".into(),
         // #[cfg(feature = "shard")]
-        SenderInvalidShard => "Transaction sender's shard is different from Block producer".into()
+        SenderInvalidShard => "Transaction sender's shard is different from Block producer".into(),
+        BlockDataLimitExceeded => "Block cannot aggregate more data elements".into()
 	}
 }
 

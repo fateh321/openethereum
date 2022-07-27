@@ -127,6 +127,15 @@ where
         self.state.is_create_txn()
     }
 
+    fn push_temp_sstore_val(&mut self, k: Address, code: Address, ah: H256, v: U256) {
+        self.state.push_temp_sstore_val(k, code ,ah, v);
+    }
+    fn push_temp_sstore_delta(&mut self, a: u64, s: String, sh: u64){
+        self.state.push_temp_sstore_delta(a, s, sh);
+    }
+    fn static_flag(&self) -> bool {
+        self.static_flag.clone()
+    }
     fn origin_address(&self)-> Address {
       self.origin_info.address.clone()
     }

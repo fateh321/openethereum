@@ -1983,6 +1983,7 @@ impl Engine<EthereumMachine> for AuthorityRound {
                     let tx_request = TransactionRequest::call(a, txn.tx().data.clone()).gas_price(U256::zero()).gas(txn.tx().gas);
                     let mut new_txn = full_client.create_shard_transaction(tx_request).unwrap();
                     new_txn.set_next_shard(999u64);
+                    new_txn.incr_hop_count(txn.get_hop_count()+1);
                     new_txn.set_incomplete(1u64);
                     new_txn.change_original_sender(txn.original_sender());
                     new_txn.hash_map_replace_with(txn.shard_data_hashmap());

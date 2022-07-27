@@ -35,6 +35,7 @@ use crate::{
     types::BlockNumber,
 };
 use atty;
+use hyperproofs::AggProof;
 use ethcore::{
     client::{
         BlockChainClient, BlockChainInfo, BlockId, BlockInfo, BlockQueueInfo, ChainInfo,
@@ -384,13 +385,23 @@ impl ChainNotify for Informant<FullNodeInformantData> {
                     self.skipped.load(AtomicOrdering::Relaxed) + new_blocks.imported.len() - 1,
                     self.skipped_txs.load(AtomicOrdering::Relaxed) + txs_imported,
                 );
-                info!(target: "import", "Imported {} {} ({} txs, {} Mgas, {} ms, {} KiB){}",
+                info!(target: "import", "Imported {} {} ({} txs, {} Mgas, {} ms, {} KiB, {} SL, {} SS, {} BR, {} BW, {} 1Hop, {} 2Hop, {} 3Hop, {} 4Hop, {} 5Hop, {} rest){}",
                     Colour::White.bold().paint(format!("#{}", header_view.number())),
                     Colour::White.bold().paint(format!("{}", header_view.hash())),
                     Colour::Yellow.bold().paint(format!("{}", block.transactions_count())),
                     Colour::Yellow.bold().paint(format!("{:.2}", header_view.gas_used().low_u64() as f32 / 1000000f32)),
                     Colour::Purple.bold().paint(format!("{}", new_blocks.duration.as_milliseconds())),
                     Colour::Blue.bold().paint(format!("{:.2}", size as f32 / 1024f32)),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_sload_count())),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_sstore_count())),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_bal_read_count())),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_bal_write_count())),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(1u64))),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(2u64))),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(3u64))),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(4u64))),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(5u64))),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(6u64))),
                     if skipped > 0 {
                         format!(" + another {} block(s) containing {} tx(s)",
                             Colour::Red.bold().paint(format!("{}", skipped)),
