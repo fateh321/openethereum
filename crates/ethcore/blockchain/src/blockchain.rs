@@ -248,6 +248,7 @@ enum CacheId {
 /// **Does not do input data verification.**
 pub struct BlockChain {
     // All locks must be captured in the order declared here.
+    pub latest_mined_block: RwLock<H256>,
     best_block: RwLock<BestBlock>,
     // Stores best block of the first uninterrupted sequence of blocks. `None` if there are no gaps.
     // Only updated with `insert_unordered_block`.
@@ -658,6 +659,7 @@ impl BlockChain {
         let cache_man = CacheManager::new(config.pref_cache_size, config.max_cache_size, 400);
 
         let mut bc = BlockChain {
+            latest_mined_block: RwLock::new(H256::zero()),
             first_block: None,
             best_block: RwLock::new(BestBlock {
                 // BestBlock will be overwritten anyway.

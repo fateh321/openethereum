@@ -1678,7 +1678,7 @@ impl Engine<EthereumMachine> for AuthorityRound {
                step, our_addr);
             return SealingState::NotReady;
         }
-        trace!(target: "engine", "Preparing block: we are the proposer for step {}. (Our address: {})",
+        debug!(target: "txn", "Preparing block: we are the proposer for step {}. (Our address: {})",
                step, our_addr);
 
 

@@ -335,8 +335,9 @@ impl Importer {
                     invalid_blocks.insert(hash);
                     continue;
                 }
+                let mut already_imported = false;
                 // t_nb 7.0 check and lock block
-                match self.check_and_lock_block(&bytes, block, client) {
+                match self.check_and_lock_block(&bytes, block, client, &mut already_imported) {
                     Ok((closed_block, pending)) => {
                         //replace the header form the enacted block
                         // shard
@@ -360,12 +361,26 @@ impl Importer {
                             .accrue_block(&header, transactions_len);
                     }
                     Err(err) => {
-                        self.bad_blocks.report(
-                            bytes,
-                            format!("{:?}", err),
-                            self.engine.params().eip1559_transition,
-                        );
-                        invalid_blocks.insert(hash);
+                        if !already_imported{
+                            self.bad_blocks.report(
+                                bytes,
+                                format!("{:?}", err),
+                                self.engine.params().eip1559_transition,
+                                false,
+                            );
+                            invalid_blocks.insert(hash);
+                        }else {
+                            self.bad_blocks.report(
+                                bytes,
+                                format!("{:?}", err),
+                                self.engine.params().eip1559_transition,
+                                true,
+                            );
+                            //insert random hash
+                            invalid_blocks.insert(H256::random());
+                            println!("block imported again..")
+                        }
+
                     }
                 }
             }
@@ -434,6 +449,7 @@ impl Importer {
         bytes: &[u8],
         block: PreverifiedBlock,
         client: &Client,
+        already_imported: &mut bool,
     ) -> EthcoreResult<(LockedBlock, Option<PendingTransition>)> {
         let engine = &*self.engine;
         let header = block.header.clone();
@@ -441,6 +457,13 @@ impl Importer {
         // Check the block isn't so old we won't be able to enact it.
         // t_nb 7.1 check if block is older then last pruned block
         let best_block_number = client.chain.read().best_block_number();
+        if header.number() <= best_block_number && header.number()>3 {
+            *already_imported = true;
+            warn!(target: "client", "Block import failed for #{} ({})\nBlock is already imported (current best block: #{}).", header.number(), header.hash(), best_block_number);
+            bail!("Block already imported");
+        }else {
+            AggProof::set_latest_imported_block(header.number());
+        }
         if client.pruning_info().earliest_state > header.number() {
             warn!(target: "client", "Block import failed for #{} ({})\nBlock is ancient (current best block: #{}).", header.number(), header.hash(), best_block_number);
             bail!("Block is ancient");
@@ -560,6 +583,7 @@ impl Importer {
 
         }
         // t_nb 8.0 Block enacting. Execution of transactions.
+
         debug!(target: "txn", "^^^^^^^^^^^^entering trace_state 0^^^^^^^^^^");
         let enact_result = {
             let chain = client.chain.read();
@@ -1987,6 +2011,16 @@ impl ImportBlock for Client {
         if self.chain.read().is_known(&unverified.hash()) {
             bail!(EthcoreErrorKind::Import(ImportErrorKind::AlreadyInChain));
         }
+        // don't import self-authored blocks
+        if unverified.header.author().eq(&self.importer.miner.authoring_params().author){
+            debug!(target: "miner", "Bailed self block import ");
+            bail!(EthcoreErrorKind::Import(ImportErrorKind::AlreadyInChain));
+        }
+
+        if (unverified.header.number() <= AggProof::get_latest_imported_block()) && unverified.header.number()>4{
+            debug!(target: "miner", "Bailed already block import ");
+            bail!(EthcoreErrorKind::Import(ImportErrorKind::AlreadyInChain));
+        }
 
         // t_nb 2.2 check if parent is known
         let status = self.block_status(BlockId::Hash(unverified.parent_hash()));
@@ -2021,6 +2055,7 @@ impl ImportBlock for Client {
                     block.bytes,
                     err.to_string(),
                     self.engine.params().eip1559_transition,
+                    false,
                 );
                 bail!(EthcoreErrorKind::Block(err))
             }
@@ -3153,7 +3188,13 @@ impl PrepareOpenBlock for Client {
         }
 
     }
-
+    fn set_latest_mined_block(&self, h: H256){
+        let mut chain = self.chain.write();
+        let mut mined_block = chain.latest_mined_block.write();
+        {
+            *mined_block = h;
+        }
+    }
     fn export_incomplete_txn(&self) -> Vec<SignedTransaction> {
         self.chain.read().incomplete_txn.read().clone()
     }
@@ -3225,6 +3266,7 @@ impl ImportSealedBlock for Client {
                     block.rlp_bytes(),
                     format!("Detected an issue with locally sealed block: {}", e),
                     self.engine.params().eip1559_transition,
+                    false,
                 );
                 return Err(e.into());
             }

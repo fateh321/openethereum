@@ -234,4 +234,6 @@ pub trait Ext {
     fn static_flag(&self) -> bool ;
     ///tells whether it is a create transaction
     fn is_create_txn(&self)->bool;
+
+    fn reverted(&mut self, s: bool);
 }

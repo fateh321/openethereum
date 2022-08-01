@@ -205,6 +205,9 @@ impl Ext for FakeExt {
     fn push_temp_sstore_delta(&mut self, a: u64, s: String, sh: u64){
 
     }
+    fn reverted(&mut self, s: bool) {
+
+    }
     fn set_next_shard(&mut self, shard: u64){
 
     }

@@ -1580,10 +1580,12 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
                     self.state.inc_nonce(&t.sender())?;
             // }
         }
-        // if the status doesn't change write the state
-        if self.state.txn_complete_status() == None {
+        // if the status doesn't change && no revert, write the state
+        if self.state.txn_complete_status() == None && !self.state.is_reverted(){
             let mut val_vec = self.state.get_temp_sstore_val();
             let mut delta_vec = self.state.get_temp_sstore_delta();
+            val_vec.reverse();
+            delta_vec.reverse();
             assert_eq!(val_vec.len(), delta_vec.len());
             for _i in 0..val_vec.len(){
                 let x = delta_vec.pop().unwrap();

@@ -335,6 +335,7 @@ pub struct State<B> {
     complete: RefCell<Option<bool>>,
     mined: RefCell<Option<bool>>,
     is_create_txn: RefCell<bool>,
+    is_revert: RefCell<bool>,
 }
 
 #[derive(Copy, Clone)]
@@ -418,6 +419,7 @@ impl<B: Backend> State<B> {
             complete: RefCell::new(None::<bool>),
             mined: RefCell::new(None::<bool>),
             is_create_txn: RefCell::new(false),
+            is_revert: RefCell::new(false),
         }
     }
 
@@ -452,6 +454,7 @@ impl<B: Backend> State<B> {
             complete: RefCell::new(None::<bool>),
             mined: RefCell::new(None::<bool>),
             is_create_txn: RefCell::new(false),
+            is_revert: RefCell::new(false),
         };
 
         Ok(state)
@@ -594,8 +597,12 @@ impl<B: Backend> State<B> {
         assert!(len > 0);
         self.data_hash_map_global.borrow_mut()[len-1].insert(key, val);
     }
-
-
+    pub fn reverted(&mut self, s: bool){
+        self.is_revert = RefCell::new(s);
+    }
+    pub fn is_reverted(&self)-> bool{
+        self.is_revert.borrow().clone()
+    }
     pub fn set_txn_status(&mut self, status: Option<bool>){
         self.complete = RefCell::new(status);
     }
@@ -1954,6 +1961,7 @@ impl Clone for State<StateDB> {
             complete: self.complete.clone(),
             mined: self.mined.clone(),
             is_create_txn: self.is_create_txn.clone(),
+            is_revert: self.is_revert.clone(),
         }
     }
 }

@@ -352,6 +352,7 @@ impl<T: InformantData> Informant<T> {
 impl ChainNotify for Informant<FullNodeInformantData> {
     // t_nb 11.2 Informant. Prints new block inclusiong to console/log.
     fn new_blocks(&self, new_blocks: NewBlocks) {
+        println!("entering informant");
         if new_blocks.has_more_blocks_to_import {
             return;
         }
@@ -385,7 +386,7 @@ impl ChainNotify for Informant<FullNodeInformantData> {
                     self.skipped.load(AtomicOrdering::Relaxed) + new_blocks.imported.len() - 1,
                     self.skipped_txs.load(AtomicOrdering::Relaxed) + txs_imported,
                 );
-                info!(target: "import", "Imported {} {} ({} txs, {} Mgas, {} ms, {} KiB, {} SL, {} SS, {} BR, {} BW, {} 1Hop, {} 2Hop, {} 3Hop, {} 4Hop, {} 5Hop, {} rest){}",
+                info!(target: "import", "Imported {} {} ({} txs, {} Mgas, {} ms, {} KiB, {} SL, {} SS, {} BR, {} BW, {} 1Hop, {} 2Hop, {} 3Hop, {} 4Hop, {} 5Hop, {} 6Hop, {} rest, {} Reverted){}",
                     Colour::White.bold().paint(format!("#{}", header_view.number())),
                     Colour::White.bold().paint(format!("{}", header_view.hash())),
                     Colour::Yellow.bold().paint(format!("{}", block.transactions_count())),
@@ -402,6 +403,8 @@ impl ChainNotify for Informant<FullNodeInformantData> {
                     Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(4u64))),
                     Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(5u64))),
                     Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(6u64))),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_hop_count(7u64))),
+                    Colour::Yellow.bold().paint(format!("{}", AggProof::get_reverted_count())),
                     if skipped > 0 {
                         format!(" + another {} block(s) containing {} tx(s)",
                             Colour::Red.bold().paint(format!("{}", skipped)),

@@ -133,6 +133,9 @@ where
     fn push_temp_sstore_delta(&mut self, a: u64, s: String, sh: u64){
         self.state.push_temp_sstore_delta(a, s, sh);
     }
+    fn reverted(&mut self, s: bool) {
+        self.state.reverted(s);
+    }
     fn static_flag(&self) -> bool {
         self.static_flag.clone()
     }

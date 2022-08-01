@@ -371,6 +371,8 @@ impl<'x> OpenBlock<'x> {
         if !t.is_incomplete() && t.is_shard(){
             self.block.state.push_address_txn_vec(sender);
         }
+        // we turn revert flag down before.
+        self.block.state.reverted(false);
         self.block.state.clear_hash_map_cache();
         //set is_create_txn flag
         if !t.is_shard(){
@@ -491,19 +493,44 @@ impl<'x> OpenBlock<'x> {
                     self.block.state.push_incomplete_txn(t.clone());
                 }
             } else{ //enact, complete
-            debug!(target: "txn", "complete txn in enact, just state.apply()");
+            if !t.tx().data.is_empty() && t.is_shard(){
+                // complete smart contract shard txn
+                debug!(target: "txn", "complete smart contract txn in enact, just state.fake_apply()");
+                self.block.state.clear_data_hashmap_txn();
+                self.block.state.set_next_shard(999u64);
+                for (key, val) in t.shard_data_hashmap().iter() {
+                    self.block.state.hash_map_txn_insert(key.clone(), val.clone())
+                }
+                // self.block.state.set_txn_status(Some(true));
+                self.block.state.set_txn_status(None);
+                // outcome = self.block.state.apply(
+                outcome = self.block.state.fake_apply(
+                    &env_info,
+                    self.engine.machine(),
+                    &t,
+                    self.block.traces.is_enabled(),
+                )?;
+                assert_eq!(self.block.state.txn_complete_status(), None);
+            }else {
+                // complete legacy or call txn
+                debug!(target: "txn", "complete call or legacy txn in enact, just state.apply()");
                 self.block.state.clear_data_hashmap_txn();
                 self.block.state.set_next_shard(999u64);
                 for (key, val) in t.shard_data_hashmap().iter() {
                     self.block.state.hash_map_txn_insert(key.clone(), val.clone())
                 }
                 self.block.state.set_txn_status(Some(true));
+                // self.block.state.set_txn_status(None);
                 outcome = self.block.state.apply(
+                // outcome = self.block.state.fake_apply(
                     &env_info,
                     self.engine.machine(),
                     &t,
                     self.block.traces.is_enabled(),
                 )?;
+                // assert_eq!(self.block.state.txn_complete_status(), None);
+            }
+
             }
 
             }
@@ -555,6 +582,9 @@ impl<'x> OpenBlock<'x> {
         // }
         if !t.is_incomplete(){
             AggProof::incr_hop_count(t.get_hop_count()+1);
+            if self.block.state.is_reverted(){
+                AggProof::incr_reverted_count();
+            }
         }
         self.block
             .transactions_set

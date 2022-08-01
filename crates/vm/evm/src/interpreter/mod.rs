@@ -803,7 +803,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                         if ext.is_static() && value.map_or(false, |v| !v.is_zero()) {
                             return Err(vm::Error::MutableCallInStaticContext);
                         }
-                        AggProof::incr_bal_read_count(1u64);
+                        // AggProof::incr_bal_read_count(1u64);
                         let has_balance = ext.balance(&self.params.address)?
                             >= value.expect("value set for all but delegate call; qed");
                         (
@@ -814,7 +814,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                         )
                     }
                     instructions::CALLCODE => {
-                        AggProof::incr_bal_read_count(1u64);
+                        // AggProof::incr_bal_read_count(1u64);
                         let has_balance = ext.balance(&self.params.address)?
                             >= value.expect("value set for all but delegate call; qed");
                         (
@@ -900,6 +900,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                 };
             }
             instructions::RETURN => {
+                println!("transaction RETURN");
                 let init_off = self.stack.pop_back();
                 let init_size = self.stack.pop_back();
 
@@ -911,6 +912,8 @@ impl<Cost: CostType> Interpreter<Cost> {
                 });
             }
             instructions::REVERT => {
+                println!("transaction reverted");
+                ext.reverted(true);
                 let init_off = self.stack.pop_back();
                 let init_size = self.stack.pop_back();
 
@@ -922,9 +925,11 @@ impl<Cost: CostType> Interpreter<Cost> {
                 });
             }
             instructions::STOP => {
+                println!("transaction STOP");
                 return Ok(InstructionResult::StopExecution);
             }
             instructions::SUICIDE => {
+                println!("transaction SUICIDE");
                 let address = u256_to_address(&self.stack.pop_back());
                 ext.al_insert_address(address.clone());
                 ext.suicide(&address)?;
@@ -1025,7 +1030,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
                     // #[cfg(feature = "shard")]
                     let key_shard = AggProof::concat_hash(ext.origin_address(), key);
-                    println!("trying to load at key {} and key_shard {}",key, key_shard);
+                    println!("trying to load at key {} and key_shard {} and address {}",key, key_shard, ext.origin_address());
                     let val = ext.hash_map_storage_at(&key_shard);
                     let word = if val.1 {
                         print!("found the key inside the hashmap");
@@ -1047,12 +1052,12 @@ impl<Cost: CostType> Interpreter<Cost> {
                         } else {
                             ext.set_txn_incomplete();
                             ext.set_next_shard(ext.origin_address().to_low_u64_be().rem_euclid(AggProof::shard_count()));
-                            println!("Stopping execution from SLOAD");
+                            println!("Stopping execution from SLOAD at address {}", ext.origin_address());
                             return Ok(InstructionResult::StopExecution);
                         }
                     };
                     // let word = ext.storage_at(&key)?.into_uint();
-                    println!("SLOAD fetching storage at {}", key);
+                    println!("SLOAD fetching storage at key {} and address {} with value {}", key, ext.origin_address(), word);
                     self.stack.push(word);
 
                     ext.al_insert_storage_key(self.params.address, key);
@@ -1137,6 +1142,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                                 }
 
                             };
+                            println!("current val for calculating delta is {}", word);
                             let mut delta = val.checked_sub(word);
                             let delta_string:String;
                             if delta == None{
@@ -1194,6 +1200,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                                 }
 
                             };
+                            println!("current val for calculating delta is {}", word);
                             let mut delta = val.checked_sub(word);
                             let delta_string:String;
                             if delta == None{
@@ -1257,6 +1264,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                                 }
 
                             };
+                            println!("current val for calculating delta is {}", word);
                             let mut delta = val.checked_sub(word);
                             let delta_string:String;
                             if delta == None{
@@ -1332,6 +1340,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                     } else{
                         ext.set_txn_incomplete();
                         ext.set_next_shard(address.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                        println!("stopping execution from balance");
                         return Ok(InstructionResult::StopExecution);
 
                     }
@@ -1469,6 +1478,7 @@ impl<Cost: CostType> Interpreter<Cost> {
                     } else{
                         ext.set_txn_incomplete();
                         ext.set_next_shard(self.params.address.to_low_u64_be().rem_euclid(AggProof::shard_count()));
+                        print!("stopping execution SELFBALANCE");
                         return Ok(InstructionResult::StopExecution);
 
                     }

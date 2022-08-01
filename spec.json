@@ -3,12 +3,13 @@
     "engine": {
         "authorityRound": {
             "params": {
-                "stepDuration": "5",
+                "stepDuration": "8",
                 "validators" : {
                     "list": [
                         "0x00bd138abd70e2f00903268f3db08f2d25677c9e",
                         "0x00aa39d30f0d20ff03a22ccfc30b7efbfca597c2",
-                        "0x002e28950558fbede1a9675cb113f0bd20912019"
+                        "0x002e28950558fbede1a9675cb113f0bd20912019",
+                        "0x00a94ac799442fb13de8302026fd03068ba6a428"
                         
                     ]
                 }
@@ -29,7 +30,9 @@
     },
     "nodes": [ 
           "enode://8db73e2e091528f3ddc59dd89d233f0d3321ddd7e1c75783cbbd4ec04dd5a8c847e4785c0ed8d97518c66b80cf8348e828ae398142f5e9112dabcb8f5ae6e86e@127.0.0.1:30301",
-          "enode://300e5f185d5ce17acf8ba9a18d287e2c7ae3c005c00f04c04f12e8ceb631558114f4b17e2af546eb3bf4e939866b440d100e4e05fb996412025b08c0e4f9bd59@127.0.0.1:30300"
+          "enode://300e5f185d5ce17acf8ba9a18d287e2c7ae3c005c00f04c04f12e8ceb631558114f4b17e2af546eb3bf4e939866b440d100e4e05fb996412025b08c0e4f9bd59@127.0.0.1:30300",
+          "enode://32b0ed4e4fe2644d18e988b41d531db86d8c7b0d372cc168f3f0526e1549908ccc9c9a853a44379b23c454031b6c879c28b072a441a7dda1db48972b9543bf41@127.0.0.1:30303",
+          "enode://8a9aadf994cad1b622f1ccbd069398233698108010b5ec59a5d293f3416c559c2889e0fe15809bfe10f7a2bf35a3259ee0bde5406d11e4e70bdaa69c37f95e26@127.0.0.1:30302"
     ],
     "genesis": {
         "seal": {
@@ -39,7 +42,7 @@
             }
         },
         "difficulty": "0x20000",
-        "gasLimit": "0x5B8D80"
+        "gasLimit": "0x5B8D800"
     },
    "accounts": {
         "0x0000000000000000000000000000000000000001": { "balance": "1", "builtin": { "name": "ecrecover", "pricing": { "linear": { "base": 3000, "word": 0 } } } },

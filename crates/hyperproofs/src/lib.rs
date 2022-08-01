@@ -25,7 +25,7 @@ use csv::Writer;
 static mut SHARD: u64 = 0u64;
 static mut LASTCOMMITROUND: u64 = 999u64;
 static mut GENESISCOMMIT: u64 = 0u64;
-
+static mut LATESTIMPORTEDBLOCK: u64 = 0u64;
 static mut SLOADCOUNT: u64 = 0u64;
 static mut SSTORECOUNT: u64 = 0u64;
 static mut BALREADCOUNT: u64 = 0u64;
@@ -37,6 +37,8 @@ static mut HOPCOUNT_3: u64 = 0u64;
 static mut HOPCOUNT_4: u64 = 0u64;
 static mut HOPCOUNT_5: u64 = 0u64;
 static mut HOPCOUNT_6: u64 = 0u64;
+static mut HOPCOUNT_7: u64 = 0u64;
+static mut REVERTED: u64 = 0u64;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AggProof{
@@ -56,9 +58,21 @@ impl AggProof{
             x if x==3u64  => unsafe{HOPCOUNT_3 += 1u64;},
             x if x==4u64  => unsafe{HOPCOUNT_4 += 1u64;},
             x if x==5u64  => unsafe{HOPCOUNT_5 += 1u64;},
-            _  => unsafe{HOPCOUNT_6 += 1u64;},
+            x if x==6u64  => unsafe{HOPCOUNT_6 += 1u64;},
+            _  => unsafe{HOPCOUNT_7 += 1u64;},
         }
     }
+    pub fn incr_reverted_count(){
+            unsafe{REVERTED += 1u64;}
+    }
+
+    pub fn get_reverted_count()-> u64{
+        unsafe {
+            let o = REVERTED;
+            o
+        }
+    }
+
     pub fn get_hop_count(hop:u64)->u64{
         match hop {
             x if x==1u64  => unsafe{let o = HOPCOUNT_1;
@@ -71,9 +85,21 @@ impl AggProof{
                 o},
             x if x==5u64  => unsafe{let o = HOPCOUNT_5;
                 o},
-            _ => unsafe{let o = HOPCOUNT_6;
+            x if x==6u64  => unsafe{let o = HOPCOUNT_6;
+                o},
+            _ => unsafe{let o = HOPCOUNT_7;
                 o},
         }
+    }
+    pub fn get_latest_imported_block()->u64{
+        unsafe {
+            let o = LATESTIMPORTEDBLOCK;
+            o }
+    }
+    pub fn set_latest_imported_block(b: u64){
+        unsafe {
+             LATESTIMPORTEDBLOCK = b;
+             }
     }
     pub fn get_sload_count()->u64{
         unsafe {
@@ -156,6 +182,7 @@ impl AggProof{
         let _s1 = Address::from_str("00bd138abd70e2f00903268f3db08f2d25677c9e").unwrap();
         let _s2 = Address::from_str("00aa39d30f0d20ff03a22ccfc30b7efbfca597c2").unwrap();
         let _s3 = Address::from_str("002e28950558fbede1a9675cb113f0bd20912019").unwrap();
+        let _s4 = Address::from_str("00a94ac799442fb13de8302026fd03068ba6a428").unwrap();
         match address {
             x if x==_s1  => unsafe{SHARD = 0u64;
             0u64},
@@ -163,6 +190,8 @@ impl AggProof{
                 1u64},
             x if x==_s3 => unsafe{SHARD = 2u64;
                 2u64},
+            x if x==_s4 => unsafe{SHARD = 3u64;
+                3u64},
             _ => unsafe{SHARD = 999u64; println!("panic!, shard not recognised");
                 999u64},
         }
@@ -189,18 +218,20 @@ impl AggProof{
     }
 
     pub fn shard_count() -> u64 {
-        3u64
+        4u64
     }
 
-    pub fn block_data_count() -> u64 {16u64}
+    pub fn block_data_count() -> u64 {128u64}
     pub fn author_shard(address: Address) -> u64 {
         let _s1 = Address::from_str("00bd138abd70e2f00903268f3db08f2d25677c9e").unwrap();
         let _s2 = Address::from_str("00aa39d30f0d20ff03a22ccfc30b7efbfca597c2").unwrap();
         let _s3 = Address::from_str("002e28950558fbede1a9675cb113f0bd20912019").unwrap();
+        let _s4 = Address::from_str("00a94ac799442fb13de8302026fd03068ba6a428").unwrap();
         match address {
            x if x==_s1  => 0u64,
             x if x==_s2 => 1u64,
             x if x==_s3 => 2u64,
+            x if x==_s4 => 3u64,
             _ => 999u64,
         }
 

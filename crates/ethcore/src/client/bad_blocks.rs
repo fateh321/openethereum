@@ -39,7 +39,7 @@ impl Default for BadBlocks {
 
 impl BadBlocks {
     /// Reports given RLP as invalid block.
-    pub fn report(&self, raw: Bytes, message: String, eip1559_transition: BlockNumber) {
+    pub fn report(&self, raw: Bytes, message: String, eip1559_transition: BlockNumber, already_imported: bool) {
         match Unverified::from_rlp(raw, eip1559_transition) {
             Ok(unverified) => {
                 error!(
@@ -59,9 +59,16 @@ impl BadBlocks {
                         .map(|(index, tx)| format!("[Tx {}] {:?}", index, tx))
                         .join("\n"),
                 );
-                self.last_blocks
-                    .write()
-                    .insert(unverified.header.hash(), (unverified, message));
+                if already_imported{
+                    // self.last_blocks
+                    //     .write()
+                    //     .insert(H256::random(), (unverified, message));
+                }else{
+                    self.last_blocks
+                        .write()
+                        .insert(unverified.header.hash(), (unverified, message));
+                }
+
             }
             Err(err) => {
                 error!(target: "client", "Bad undecodable block detected: {}\n{:?}", message, err);

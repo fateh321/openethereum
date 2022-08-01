@@ -800,6 +800,7 @@ impl Miner {
         debug!(target: "miner", "before importing hashmaps");
         chain.import_hash_map_in_chain(block.state.export_data_hashmap_global(), block.state.export_data_hashmap_round_beginning(), block.state.export_incr_bal_round());
         debug!(target: "miner", "after importing hashmaps");
+        chain.set_latest_mined_block(block.header.hash());
         Some((block, original_work_hash))
     }
 
@@ -1487,6 +1488,7 @@ impl miner::MinerService for Miner {
         // | Make sure to release the locks before calling that method.             |
         // --------------------------------------------------------------------------
         trace!(target: "miner", "update_sealing: preparing a block");
+        debug!(target: "miner", "update_sealing here");
         let (block, original_work_hash) = match self.prepare_block(chain) {
             Some((block, original_work_hash)) => (block, original_work_hash),
             None => return,
@@ -1505,8 +1507,10 @@ impl miner::MinerService for Miner {
         match sealing_state {
             SealingState::Ready => {
                 trace!(target: "miner", "update_sealing: engine indicates internal sealing");
+                debug!(target: "miner", "update_sealing: engine indicates internal sealing");
                 if self.seal_and_import_block_internally(chain, block) {
                     trace!(target: "miner", "update_sealing: imported internally sealed block");
+                    debug!(target: "miner", "update_sealing: imported internally sealed block");
                 }
                 return;
             }

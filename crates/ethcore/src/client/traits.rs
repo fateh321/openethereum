@@ -572,6 +572,7 @@ pub trait PrepareOpenBlock {
         hash_map_round_beginning: HashMap<Address,U256>,
         incr_bal_round: HashMap<Address, U256>,
     ) ;
+    fn set_latest_mined_block(&self, h: H256);
     fn export_incomplete_txn(&self) -> Vec<SignedTransaction>;
     fn clear_incomplete_txn(&self) ;
     fn clear_pending_incomplete_txn(&self);

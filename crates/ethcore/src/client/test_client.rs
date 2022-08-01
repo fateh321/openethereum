@@ -472,6 +472,9 @@ impl PrepareOpenBlock for TestBlockChainClient {
     }
     fn import_hash_map_in_chain(&self, hash_map_global: Vec<HashMap<Address, U256>>, hash_map_round_beginning: HashMap<Address, U256>, incr_bal_round: HashMap<Address,U256>) {
     }
+    fn set_latest_mined_block(&self, h: H256){
+
+    }
     fn export_incomplete_txn(&self) -> Vec<SignedTransaction> {
         Vec::new()
     }
