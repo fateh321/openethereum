@@ -1,4 +1,6 @@
-# OpenEthereum
+# Mobius
+
+Read the paper on https://beillahi.github.io/papers/ICBC23.pdf
 
 Fast and feature-rich multi-network Ethereum client.
 
